@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>REDACTR</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <h1>REDACTR</h1>
+      <p id="statusLabel" class="status" aria-live="polite">Protection is on</p>
+
+      <label class="toggle-row" for="enabledToggle">
+        <span class="toggle-label">Enable protection</span>
+        <input id="enabledToggle" type="checkbox" role="switch" />
+      </label>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
