@@ -1,3 +1,5 @@
+import type { PIIEvent } from './events';
+
 export type RuntimeRequest =
   | {
       type: 'CONTENT_SCRIPT_BOOTSTRAP';
@@ -10,6 +12,10 @@ export type RuntimeRequest =
   | {
       type: 'SET_EXTENSION_STATE';
       enabled: boolean;
+    }
+  | {
+      type: 'TRACK_PII_EVENT';
+      event: PIIEvent;
     };
 
 export type RuntimeResponse =

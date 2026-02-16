@@ -3,9 +3,11 @@ import type {
   RuntimeRequest,
   RuntimeResponse
 } from '../shared/messages';
+import { sanitizePIIEvent } from '../shared/events';
 import {
   DEFAULT_EXTENSION_ENABLED,
   EXTENSION_ENABLED_KEY,
+  appendPIIEvent,
   getExtensionEnabled,
   setExtensionEnabled
 } from '../shared/storage';
@@ -75,6 +77,13 @@ chrome.runtime.onMessage.addListener(
         await setExtensionEnabled(request.enabled);
         await notifyTabsOfState(request.enabled);
         sendResponse({ ok: true, enabled: request.enabled } satisfies RuntimeResponse);
+        return;
+      }
+
+      if (request.type === 'TRACK_PII_EVENT') {
+        const sanitizedEvent = sanitizePIIEvent(request.event);
+        await appendPIIEvent(sanitizedEvent);
+        sendResponse({ ok: true } satisfies RuntimeResponse);
       }
     };
 

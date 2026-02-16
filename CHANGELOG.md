@@ -3,6 +3,61 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Implemented Phase 4 Intervention UX & Submit Control:
+  - Added a new intervention module in the content script:
+    - `src/content/intervention/types.ts` for action/view contracts, severity helpers, and detection signatures.
+    - `src/content/intervention/banner.ts` for Shadow DOM warning rendering, grouped findings, severity color coding, keyboard controls, and ARIA-labeled action controls.
+    - `src/content/intervention/controller.ts` for submit-blocking state machine, allow-once suppression, persistent allowlist enforcement, action handling, and auto-submit flow.
+  - Wired intervention flow into `src/content/index.ts`:
+    - real-time detection now updates intervention state
+    - submit interception delegates to controller logic
+    - cleanup includes intervention teardown.
+  - Expanded platform adapter UI behavior in `src/content/adapters/base.ts`:
+    - real warning skeleton rendering via `renderWarning(...)`
+    - lightweight inline highlighting for textarea/input and contenteditable ranges.
+  - Added allowlist persistence helpers in `src/shared/storage.ts`:
+    - `ALLOWLIST_ENTRIES_KEY`
+    - `ALLOWLIST_MAX_ENTRIES` (100, FIFO)
+    - `AllowlistEntry`, `getAllowlistEntries()`, `addAllowlistEntries()`, and `isDetectionAllowlisted(...)`.
+  - Added intervention event factory support in `src/shared/events.ts`:
+    - `createPIIActionEvent(...)` for `pii_masked`, `pii_edit_requested`, `pii_allowed_once`, `warning_dismissed`, `submit_intercepted`, and `pii_allowlisted`.
+  - Added Phase 4 test coverage:
+    - `tests/content/banner.test.ts` for grouped banner rendering, severity colors, ARIA coverage, keyboard controls, and Shadow DOM.
+    - `tests/content/intervention-controller.test.ts` for blocking/non-blocking submit behavior, mask-and-send replacement, allow-once, always-allow persistence, bypass flow, and dismiss semantics.
+    - Updated `tests/pii/events.test.ts` for action event factory validation.
+    - Updated `tests/adapters/hooks.test.ts` to validate inline highlight behavior.
+  - Improved phone detection coverage for Thai local mobile numbers:
+    - plain Thai mobile formats without separators (for example `0853236132`, `0961234567`) now trigger `phone` detection.
+    - added corpus tests to lock this behavior.
+
+- Implemented Phase 3 PII Detection Engine:
+  - Added full PII detection contracts and rule registry with 11 categories: `credit_card`, `bank_account`, `ssn`, `api_key`, `password`, `passport`, `national_id`, `email`, `phone`, `employee_name`, and `address`.
+  - Added category detectors with Thai + US coverage for country-specific identifiers, including Luhn validation for credit card detection and Thai 13-digit checksum validation for national IDs.
+  - Added deterministic masking utility (`generateMask`) across all PII categories.
+  - Added code-block context analysis for fenced/inline backticks and `<code>/<pre>` tags to downgrade severity and reduce false positives.
+  - Added overlap resolution and confidence scoring pipeline in `detectPII()` with long-input chunking (>10K chars).
+- Wired detection into content-script text-change flow (reusing existing 300ms debounce + immediate paste behavior) and added `scan_completed` event emission with latency + prompt length metadata only.
+- Added shared event typing/utilities and background event ingestion with privacy-preserving sanitization and local retention storage.
+- Added Phase 3 test coverage:
+  - 100+ corpus-driven category cases
+  - rule behavior tests (code-block downgrade, overlap handling, chunking)
+  - Luhn and mask unit tests
+  - event privacy tests
+  - p95 latency performance guard for 2000-char inputs
+
+- Implemented Phase 2 Platform Adapter Layer:
+  - Added full `PlatformAdapter` contract and shared adapter utilities for selector fallback, event lifecycle management, and cleanup.
+  - Added ChatGPT adapter with resilient 3-tier input/submit selectors, textarea capture, text-change observation, and submit interception hooks.
+  - Added Claude adapter with resilient 3-tier input/submit selectors, contenteditable HTML-to-text capture, text-change observation, and submit interception hooks.
+  - Added platform adapter factory with URL-based auto-detection for `chatgpt.com`, `chat.openai.com`, and `claude.ai`.
+- Updated content script to initialize adapters when enabled, wire text-change and submit-intercept debug hooks, and teardown observers/listeners on state changes/unload.
+- Added Phase 2 unit test coverage using `jsdom` for:
+  - adapter factory platform detection
+  - selector fallback behavior
+  - text capture and text-change hooks
+  - submit interception (click + Enter block/non-block)
+  - cleanup/idempotent lifecycle behavior
+- Updated Vitest environment to `jsdom` and added `jsdom` as a development dependency.
 
 - Phase 1 foundation scaffold using Vite + TypeScript + CRXJS
 - Added Manifest V3 extension skeleton with minimal permissions:
