@@ -1,4 +1,9 @@
-import type { PIICategory, Severity } from '../content/pii/types';
+import type {
+  DetectionDecision,
+  DetectionMode,
+  PIICategory,
+  Severity
+} from '../content/pii/types';
 
 export type PlatformId = 'chatgpt' | 'claude';
 
@@ -23,6 +28,11 @@ export interface PIIEvent {
   category?: PIICategory;
   severity?: Severity;
   confidence?: number;
+  decision?: DetectionDecision;
+  shadow_decision?: DetectionDecision | 'mixed';
+  suppressed_reason?: string;
+  rule_version?: string;
+  mode?: DetectionMode;
   prompt_length?: number;
   action_latency_ms?: number;
   session_id: string;
@@ -37,6 +47,11 @@ export interface ScanCompletedEventInput {
   piiFound: boolean;
   latencyMs: number;
   sessionId: string;
+  mode?: DetectionMode;
+  ruleVersion?: string;
+  decision?: DetectionDecision;
+  shadowDecision?: DetectionDecision | 'mixed';
+  suppressedReason?: string;
 }
 
 export type PIIActionEventType = Extract<
@@ -58,6 +73,11 @@ export interface PIIActionEventInput {
   category?: PIICategory;
   severity?: Severity;
   confidence?: number;
+  decision?: DetectionDecision;
+  shadowDecision?: DetectionDecision;
+  suppressedReason?: string;
+  mode?: DetectionMode;
+  ruleVersion?: string;
 }
 
 export const createScanCompletedEvent = (
@@ -66,7 +86,7 @@ export const createScanCompletedEvent = (
   const now = new Date().toISOString();
   const roundedLatencyMs = Number(input.latencyMs.toFixed(2));
 
-  return {
+  const event: PIIEvent = {
     event_id: crypto.randomUUID(),
     timestamp: now,
     event_type: 'scan_completed',
@@ -77,6 +97,28 @@ export const createScanCompletedEvent = (
     pii_found: input.piiFound,
     latency_ms: roundedLatencyMs
   };
+
+  if (input.mode) {
+    event.mode = input.mode;
+  }
+
+  if (input.ruleVersion) {
+    event.rule_version = input.ruleVersion;
+  }
+
+  if (input.decision) {
+    event.decision = input.decision;
+  }
+
+  if (input.shadowDecision) {
+    event.shadow_decision = input.shadowDecision;
+  }
+
+  if (input.suppressedReason) {
+    event.suppressed_reason = input.suppressedReason;
+  }
+
+  return event;
 };
 
 export const createPIIActionEvent = (input: PIIActionEventInput): PIIEvent => {
@@ -105,6 +147,26 @@ export const createPIIActionEvent = (input: PIIActionEventInput): PIIEvent => {
     event.confidence = input.confidence;
   }
 
+  if (input.decision) {
+    event.decision = input.decision;
+  }
+
+  if (input.shadowDecision) {
+    event.shadow_decision = input.shadowDecision;
+  }
+
+  if (input.suppressedReason) {
+    event.suppressed_reason = input.suppressedReason;
+  }
+
+  if (input.mode) {
+    event.mode = input.mode;
+  }
+
+  if (input.ruleVersion) {
+    event.rule_version = input.ruleVersion;
+  }
+
   return event;
 };
 
@@ -127,6 +189,26 @@ export const sanitizePIIEvent = (event: PIIEvent): PIIEvent => {
 
   if (typeof event.confidence === 'number') {
     sanitized.confidence = event.confidence;
+  }
+
+  if (event.decision) {
+    sanitized.decision = event.decision;
+  }
+
+  if (event.shadow_decision) {
+    sanitized.shadow_decision = event.shadow_decision;
+  }
+
+  if (event.suppressed_reason) {
+    sanitized.suppressed_reason = event.suppressed_reason;
+  }
+
+  if (event.rule_version) {
+    sanitized.rule_version = event.rule_version;
+  }
+
+  if (event.mode) {
+    sanitized.mode = event.mode;
   }
 
   if (typeof event.prompt_length === 'number') {

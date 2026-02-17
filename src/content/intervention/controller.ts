@@ -15,8 +15,8 @@ import { WarningBanner } from './banner';
 import {
   getDetectionKey,
   getDetectionSignature,
+  hasBlockingDecision,
   highestSeverity,
-  isBlockingSeverity,
   type InterventionAction,
   type WarningViewModel
 } from './types';
@@ -104,7 +104,7 @@ export class InterventionController {
 
   private buildWarningModel(detections: DetectionResult[]): WarningViewModel {
     const severity = highestSeverity(detections);
-    const blocking = isBlockingSeverity(severity);
+    const blocking = hasBlockingDecision(detections);
 
     return {
       severity,
@@ -118,7 +118,8 @@ export class InterventionController {
         category: detection.category,
         severity: detection.severity,
         maskedPreview: detection.suggestedMask,
-        confidence: detection.confidence
+        confidence: detection.confidence,
+        decision: detection.decision
       }))
     };
   }
@@ -176,7 +177,11 @@ export class InterventionController {
       actionLatencyMs,
       category: primaryDetection?.category,
       severity: primaryDetection?.severity,
-      confidence: primaryDetection?.confidence
+      confidence: primaryDetection?.confidence,
+      decision: primaryDetection?.decision,
+      shadowDecision: primaryDetection?.shadowDecision,
+      suppressedReason: primaryDetection?.suppressedReason,
+      ruleVersion: 'v2'
     });
 
     void this.sendEvent(event);
@@ -325,9 +330,13 @@ export class InterventionController {
   onScanResult(text: string, detections: DetectionResult[]): void {
     this.latestText = text;
 
-    const filteredDetections = detections.filter(
-      (detection) => !this.shouldSuppress(detection)
-    );
+    const filteredDetections = detections.filter((detection) => {
+      if (detection.decision === 'ignore') {
+        return false;
+      }
+
+      return !this.shouldSuppress(detection);
+    });
 
     this.activeDetections = filteredDetections;
 
@@ -356,8 +365,7 @@ export class InterventionController {
       return true;
     }
 
-    const severity = highestSeverity(this.activeDetections);
-    if (!isBlockingSeverity(severity)) {
+    if (!hasBlockingDecision(this.activeDetections)) {
       return true;
     }
 

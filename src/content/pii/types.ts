@@ -12,6 +12,24 @@ export type PIICategory =
   | 'address';
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
+export type DetectionMode = 'relaxed' | 'standard' | 'strict';
+export type DetectionExecutionMode = 'enforced' | 'shadow';
+export type ValidationStage = 'candidate' | 'validated';
+export type DetectionDecision = 'block' | 'warn' | 'ignore';
+
+export type ScoreSignalSource =
+  | 'pattern'
+  | 'context'
+  | 'validator'
+  | 'suppressor'
+  | 'heuristic';
+
+export interface ScoreSignal {
+  name: string;
+  source: ScoreSignalSource;
+  weight: number;
+  applied: boolean;
+}
 
 export const SEVERITY_PRIORITY: Record<Severity, number> = {
   critical: 4,
@@ -20,8 +38,17 @@ export const SEVERITY_PRIORITY: Record<Severity, number> = {
   low: 1
 };
 
+export interface ScoreBreakdown {
+  baseConfidence: number;
+  contextBonus: number;
+  signalDelta: number;
+  codePenalty: number;
+  finalConfidence: number;
+}
+
 export interface DetectionResult {
   text: string;
+  normalizedText?: string;
   category: PIICategory;
   severity: Severity;
   confidence: number;
@@ -29,10 +56,18 @@ export interface DetectionResult {
   endIndex: number;
   suggestedMask: string;
   rule: string;
+  validationStage: ValidationStage;
+  decision: DetectionDecision;
+  scoreBreakdown: ScoreBreakdown;
+  scoreSignals: ScoreSignal[];
+  countryHint?: string;
+  shadowDecision?: DetectionDecision;
+  suppressedReason?: string;
 }
 
 export interface RuleMatch {
   text: string;
+  normalizedText?: string;
   category: PIICategory;
   severity: Severity;
   startIndex: number;
@@ -40,6 +75,10 @@ export interface RuleMatch {
   baseConfidence: number;
   rule: string;
   contextBonus?: number;
+  validationStage?: ValidationStage;
+  scoreSignals?: ScoreSignal[];
+  countryHint?: string;
+  suppressedReason?: string;
 }
 
 export interface PIIRule {
@@ -49,9 +88,18 @@ export interface PIIRule {
   detect(input: string): RuleMatch[];
 }
 
+export interface CategoryThreshold {
+  warn: number;
+  block?: number;
+}
+
 export interface DetectPIIOptions {
   chunkThreshold?: number;
   chunkSize?: number;
+  mode?: DetectionMode;
+  executionMode?: DetectionExecutionMode;
+  enabledCategories?: PIICategory[];
+  categoryThresholds?: Partial<Record<PIICategory, CategoryThreshold>>;
 }
 
 export interface TextRange {

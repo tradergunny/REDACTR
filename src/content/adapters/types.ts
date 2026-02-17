@@ -1,4 +1,4 @@
-import type { PIICategory } from '../pii/types';
+import type { DetectionDecision, PIICategory } from '../pii/types';
 
 export type PlatformId = 'chatgpt' | 'claude';
 
@@ -22,6 +22,7 @@ export interface WarningConfig {
     severity: Severity;
     maskedPreview: string;
     confidence: number;
+    decision?: DetectionDecision;
   }[];
 }
 

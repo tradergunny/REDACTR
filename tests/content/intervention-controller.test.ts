@@ -39,7 +39,7 @@ const createChromeMock = (): typeof chrome => {
       local: {
         get: async () => ({}),
         set: async () => undefined
-      } as chrome.storage.LocalStorageArea
+      } as unknown as chrome.storage.LocalStorageArea
     }
   } as unknown as typeof chrome;
 };
@@ -153,7 +153,17 @@ const criticalDetection: DetectionResult = {
   startIndex: 10,
   endIndex: 21,
   suggestedMask: '***-**-6789',
-  rule: 'ssn.pattern'
+  rule: 'ssn.pattern',
+  validationStage: 'validated',
+  decision: 'block',
+  scoreSignals: [],
+  scoreBreakdown: {
+    baseConfidence: 0.95,
+    contextBonus: 0,
+    signalDelta: 0.04,
+    codePenalty: 0,
+    finalConfidence: 0.99
+  }
 };
 
 const mediumDetection: DetectionResult = {
@@ -164,7 +174,17 @@ const mediumDetection: DetectionResult = {
   startIndex: 6,
   endIndex: 22,
   suggestedMask: 'j***@example.com',
-  rule: 'email.pattern'
+  rule: 'email.pattern',
+  validationStage: 'validated',
+  decision: 'warn',
+  scoreSignals: [],
+  scoreBreakdown: {
+    baseConfidence: 0.88,
+    contextBonus: 0,
+    signalDelta: 0.02,
+    codePenalty: 0,
+    finalConfidence: 0.9
+  }
 };
 
 describe('InterventionController', () => {

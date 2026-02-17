@@ -1,23 +1,32 @@
-import type { PIIRule, RuleMatch } from '../types';
-import { luhnCheck, normalizeDigits } from '../validators/luhn';
+import type { PIIRule, RuleMatch, ScoreSignal } from '../types';
 import {
-  hasKeywordNearby,
+  type CardNetwork,
+  detectThaiIdOrCardCandidates
+} from '../validators/id-card-detector';
+import {
   makeRuleMatch,
-  runGlobalRegex
+  pushSignal
 } from './shared';
 
-const CREDIT_CARD_REGEX = /\b(?:\d[ -]*?){13,19}\b/g;
-const NON_CARD_CONTEXT_KEYWORDS = [
-  'national id',
-  'citizen id',
-  'taxpayer id',
-  'เลขประจำตัวประชาชน',
-  'passport',
-  'bank account',
-  'routing',
-  'account number',
-  'acct'
-];
+const networkSignalName = (network: CardNetwork): string => {
+  if (network === 'VISA') {
+    return 'issuer_network_visa';
+  }
+
+  if (network === 'MASTERCARD') {
+    return 'issuer_network_mastercard';
+  }
+
+  if (network === 'AMEX') {
+    return 'issuer_network_amex';
+  }
+
+  if (network === 'DISCOVER') {
+    return 'issuer_network_discover';
+  }
+
+  return 'issuer_network_unknown';
+};
 
 export const creditCardRule: PIIRule = {
   id: 'credit_card.luhn',
@@ -26,38 +35,43 @@ export const creditCardRule: PIIRule = {
   detect(input: string): RuleMatch[] {
     const matches: RuleMatch[] = [];
 
-    for (const candidate of runGlobalRegex(CREDIT_CARD_REGEX, input)) {
-      const value = candidate[0].trim();
-      const digits = normalizeDigits(value);
-
-      if (digits.length < 13 || digits.length > 19) {
+    for (const candidate of detectThaiIdOrCardCandidates(input)) {
+      if (candidate.type !== 'CREDIT_CARD') {
         continue;
       }
 
-      if (!luhnCheck(digits)) {
-        continue;
+      const scoreSignals: ScoreSignal[] = [];
+
+      if (candidate.matchedPrefixNetwork !== null) {
+        pushSignal(
+          scoreSignals,
+          networkSignalName(candidate.matchedPrefixNetwork),
+          'validator',
+          0.02
+        );
       }
 
-      const startIndex = candidate.index ?? 0;
-      const endIndex = startIndex + value.length;
-      if (
-        hasKeywordNearby(
-          input,
-          startIndex,
-          endIndex,
-          NON_CARD_CONTEXT_KEYWORDS,
-          40
-        )
-      ) {
-        continue;
+      if (candidate.contextSignals.cardKeywordNearby) {
+        pushSignal(scoreSignals, 'card_context_present', 'context', 0.03);
+      }
+
+      if (candidate.contextSignals.thaiKeywordNearby) {
+        pushSignal(scoreSignals, 'thai_id_context_nearby', 'context', -0.01);
+      }
+
+      if (candidate.contextSignals.negativeKeywordNearby) {
+        pushSignal(scoreSignals, 'ambiguous_numeric_context', 'suppressor', -0.02);
       }
 
       matches.push(
-        makeRuleMatch(value, startIndex, {
+        makeRuleMatch(candidate.raw, candidate.startIndex, {
           rule: 'credit_card.luhn',
           category: 'credit_card',
           severity: 'critical',
-          baseConfidence: 0.99
+          baseConfidence: 0.96,
+          normalizedText: candidate.normalizedNumber,
+          validationStage: 'validated',
+          scoreSignals
         })
       );
     }

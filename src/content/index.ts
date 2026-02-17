@@ -7,8 +7,14 @@ import type {
 } from '../shared/messages';
 import { detectPII } from './pii';
 import { createScanCompletedEvent } from '../shared/events';
-import { getExtensionEnabled } from '../shared/storage';
+import {
+  DEFAULT_DETECTION_SETTINGS,
+  type DetectionSettings,
+  getDetectionSettings,
+  getExtensionEnabled
+} from '../shared/storage';
 import { InterventionController } from './intervention/controller';
+import type { DetectionResult } from './pii';
 
 const MARKER_ATTRIBUTE = 'data-redactr-enabled';
 
@@ -26,6 +32,8 @@ const sendBootstrapMessage = (): Promise<RuntimeResponse> =>
 let activeAdapter: PlatformAdapter | null = null;
 let teardownAdapterHooks: (() => void) | null = null;
 const sessionId = crypto.randomUUID();
+let extensionEnabled = true;
+let activeDetectionSettings: DetectionSettings = DEFAULT_DETECTION_SETTINGS;
 
 const sendPIIEvent = async (request: RuntimeRequest): Promise<void> => {
   try {
@@ -33,6 +41,21 @@ const sendPIIEvent = async (request: RuntimeRequest): Promise<void> => {
   } catch (error) {
     console.warn('Unable to send PII event to background worker', error);
   }
+};
+
+const pickPrimaryDetection = (detections: DetectionResult[]): DetectionResult | null => {
+  if (!detections.length) {
+    return null;
+  }
+
+  return [...detections].sort((left, right) => {
+    if (left.severity !== right.severity) {
+      const priority = { critical: 4, high: 3, medium: 2, low: 1 };
+      return priority[right.severity] - priority[left.severity];
+    }
+
+    return right.confidence - left.confidence;
+  })[0] ?? null;
 };
 
 const teardownAdapter = (): void => {
@@ -43,7 +66,7 @@ const teardownAdapter = (): void => {
   activeAdapter = null;
 };
 
-const setupAdapter = (enabled: boolean): void => {
+const setupAdapter = (enabled: boolean, settings: DetectionSettings): void => {
   teardownAdapter();
 
   if (!enabled) {
@@ -73,8 +96,14 @@ const setupAdapter = (enabled: boolean): void => {
 
   const scanText = (text: string): void => {
     const scanStart = performance.now();
-    const detections = detectPII(text);
+    const detections = detectPII(text, {
+      mode: settings.mode,
+      executionMode: settings.executionMode,
+      enabledCategories: settings.enabledCategories,
+      categoryThresholds: settings.categoryThresholds
+    });
     const scanLatencyMs = performance.now() - scanStart;
+    const primary = pickPrimaryDetection(detections);
 
     console.debug('[REDACTR] text changed', {
       platform: adapter.platformId,
@@ -88,7 +117,15 @@ const setupAdapter = (enabled: boolean): void => {
       promptLength: text.length,
       piiFound: detections.length > 0,
       latencyMs: scanLatencyMs,
-      sessionId
+      sessionId,
+      mode: settings.mode,
+      ruleVersion: 'v2',
+      decision: primary?.decision,
+      shadowDecision:
+        settings.executionMode === 'shadow'
+          ? (primary?.shadowDecision ?? 'mixed')
+          : undefined,
+      suppressedReason: primary?.suppressedReason
     });
 
     void sendPIIEvent({
@@ -169,14 +206,26 @@ const setupAdapter = (enabled: boolean): void => {
 };
 
 const initialize = async (): Promise<void> => {
-  const enabled = await getExtensionEnabled();
+  const [enabled, settings] = await Promise.all([
+    getExtensionEnabled(),
+    getDetectionSettings()
+  ]);
+  extensionEnabled = enabled;
+  activeDetectionSettings = settings;
   updateMarker(enabled);
-  setupAdapter(enabled);
+  setupAdapter(enabled, settings);
 
   const messageListener = (message: RuntimeBroadcast): void => {
     if (message.type === 'EXTENSION_STATE_CHANGED') {
+      extensionEnabled = message.enabled;
       updateMarker(message.enabled);
-      setupAdapter(message.enabled);
+      setupAdapter(message.enabled, activeDetectionSettings);
+      return;
+    }
+
+    if (message.type === 'DETECTION_SETTINGS_CHANGED') {
+      activeDetectionSettings = message.settings;
+      setupAdapter(extensionEnabled, activeDetectionSettings);
     }
   };
 

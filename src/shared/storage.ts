@@ -1,13 +1,47 @@
 import type { PIIEvent } from './events';
-import type { DetectionResult, PIICategory } from '../content/pii/types';
+import type {
+  CategoryThreshold,
+  DetectionExecutionMode,
+  DetectionMode,
+  DetectionResult,
+  PIICategory
+} from '../content/pii/types';
 
 export const EXTENSION_ENABLED_KEY = 'extensionEnabled';
 export const DEFAULT_EXTENSION_ENABLED = true;
+export const DETECTION_SETTINGS_KEY = 'detectionSettings';
 export const PII_EVENTS_KEY = 'piiEvents';
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_STORED_EVENTS = 5000;
 export const ALLOWLIST_ENTRIES_KEY = 'allowlistEntries';
 export const ALLOWLIST_MAX_ENTRIES = 100;
+
+const DEFAULT_ENABLED_CATEGORIES: PIICategory[] = [
+  'credit_card',
+  'bank_account',
+  'ssn',
+  'api_key',
+  'password',
+  'passport',
+  'national_id',
+  'email',
+  'phone',
+  'employee_name',
+  'address'
+];
+
+export interface DetectionSettings {
+  mode: DetectionMode;
+  executionMode: DetectionExecutionMode;
+  enabledCategories: PIICategory[];
+  categoryThresholds?: Partial<Record<PIICategory, CategoryThreshold>>;
+}
+
+export const DEFAULT_DETECTION_SETTINGS: DetectionSettings = {
+  mode: 'standard',
+  executionMode: 'enforced',
+  enabledCategories: DEFAULT_ENABLED_CATEGORIES
+};
 
 export interface AllowlistEntry {
   category: PIICategory;
@@ -28,6 +62,102 @@ export const getExtensionEnabled = async (): Promise<boolean> => {
 
 export const setExtensionEnabled = async (enabled: boolean): Promise<void> => {
   await chrome.storage.sync.set({ [EXTENSION_ENABLED_KEY]: enabled });
+};
+
+const isPIICategory = (value: unknown): value is PIICategory =>
+  typeof value === 'string' && DEFAULT_ENABLED_CATEGORIES.includes(value as PIICategory);
+
+const isCategoryThreshold = (value: unknown): value is CategoryThreshold => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<CategoryThreshold>;
+  if (typeof candidate.warn !== 'number') {
+    return false;
+  }
+
+  if (typeof candidate.block !== 'undefined' && typeof candidate.block !== 'number') {
+    return false;
+  }
+
+  return true;
+};
+
+const normalizeCategoryThresholds = (
+  value: unknown
+): Partial<Record<PIICategory, CategoryThreshold>> | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const normalized: Partial<Record<PIICategory, CategoryThreshold>> = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (!isPIICategory(key) || !isCategoryThreshold(entry)) {
+      continue;
+    }
+
+    normalized[key] = {
+      warn: entry.warn,
+      block: entry.block
+    };
+  }
+
+  return Object.keys(normalized).length ? normalized : undefined;
+};
+
+const normalizeDetectionSettings = (value: unknown): DetectionSettings => {
+  if (!value || typeof value !== 'object') {
+    return { ...DEFAULT_DETECTION_SETTINGS };
+  }
+
+  const candidate = value as Partial<DetectionSettings>;
+
+  const mode: DetectionMode =
+    candidate.mode === 'relaxed' || candidate.mode === 'strict' || candidate.mode === 'standard'
+      ? candidate.mode
+      : DEFAULT_DETECTION_SETTINGS.mode;
+
+  const executionMode: DetectionExecutionMode =
+    candidate.executionMode === 'shadow' || candidate.executionMode === 'enforced'
+      ? candidate.executionMode
+      : DEFAULT_DETECTION_SETTINGS.executionMode;
+
+  const enabledCategories = Array.isArray(candidate.enabledCategories)
+    ? candidate.enabledCategories.filter((entry) => isPIICategory(entry))
+    : DEFAULT_DETECTION_SETTINGS.enabledCategories;
+
+  return {
+    mode,
+    executionMode,
+    enabledCategories: enabledCategories.length
+      ? enabledCategories
+      : DEFAULT_DETECTION_SETTINGS.enabledCategories,
+    categoryThresholds: normalizeCategoryThresholds(candidate.categoryThresholds)
+  };
+};
+
+export const getDetectionSettings = async (): Promise<DetectionSettings> => {
+  const result = await chrome.storage.sync.get(DETECTION_SETTINGS_KEY);
+  return normalizeDetectionSettings(result[DETECTION_SETTINGS_KEY]);
+};
+
+export const setDetectionSettings = async (
+  patch: Partial<DetectionSettings>
+): Promise<DetectionSettings> => {
+  const current = await getDetectionSettings();
+  const next = normalizeDetectionSettings({
+    ...current,
+    ...patch,
+    categoryThresholds: patch.categoryThresholds ?? current.categoryThresholds
+  });
+
+  await chrome.storage.sync.set({
+    [DETECTION_SETTINGS_KEY]: next
+  });
+
+  return next;
 };
 
 const isFreshEvent = (event: PIIEvent, now: number): boolean => {

@@ -31,11 +31,17 @@ export const getDetectionKey = (detection: DetectionResult): string =>
     detection.text,
     detection.startIndex,
     detection.endIndex,
-    detection.rule
+    detection.rule,
+    detection.decision
   ].join(':');
 
-export const isBlockingSeverity = (severity: Severity): boolean =>
-  severity === 'critical' || severity === 'high';
+export const hasBlockingDecision = (detections: DetectionResult[]): boolean =>
+  detections.some(
+    (detection) =>
+      detection.decision === 'block' ||
+      ((!detection.decision || detection.decision === 'warn') &&
+        (detection.severity === 'critical' || detection.severity === 'high'))
+  );
 
 export const highestSeverity = (detections: DetectionResult[]): Severity => {
   if (detections.length === 0) {

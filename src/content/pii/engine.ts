@@ -1,13 +1,16 @@
 import { getCodeBlockRanges, isWithinCodeBlock } from './context';
 import { generateMask } from './mask';
+import { resolvePolicyDecision } from './policy';
 import { PII_RULES } from './rules';
 import {
   clampConfidence,
+  DetectionDecision,
   downgradeSeverity,
   rangesOverlap,
   SEVERITY_PRIORITY,
   type DetectionResult,
   type DetectPIIOptions,
+  type PIICategory,
   type RuleMatch
 } from './types';
 
@@ -15,28 +18,89 @@ const DEFAULT_CHUNK_THRESHOLD = 10_000;
 const DEFAULT_CHUNK_SIZE = 4_000;
 const CHUNK_OVERLAP = 128;
 
-const confidenceFromMatch = (match: RuleMatch, insideCodeBlock: boolean): number => {
-  const codePenalty = insideCodeBlock ? -0.2 : 0;
-  return clampConfidence(match.baseConfidence + (match.contextBonus ?? 0) + codePenalty);
+const CATEGORY_OVERLAP_PRIORITY: Record<PIICategory, number> = {
+  api_key: 120,
+  credit_card: 115,
+  ssn: 110,
+  bank_account: 108,
+  national_id: 104,
+  passport: 102,
+  password: 100,
+  email: 90,
+  phone: 88,
+  address: 80,
+  employee_name: 70
 };
 
-const toDetectionResult = (match: RuleMatch, insideCodeBlock: boolean): DetectionResult => {
+const DECISION_PRIORITY: Record<DetectionDecision, number> = {
+  block: 3,
+  warn: 2,
+  ignore: 1
+};
+
+const signalDeltaFromMatch = (match: RuleMatch): number =>
+  (match.scoreSignals ?? [])
+    .filter((signal) => signal.applied)
+    .reduce((total, signal) => total + signal.weight, 0);
+
+const toDetectionResult = (
+  match: RuleMatch,
+  insideCodeBlock: boolean,
+  options: DetectPIIOptions
+): DetectionResult => {
+  const codePenalty = insideCodeBlock ? -0.2 : 0;
   const severity = insideCodeBlock ? downgradeSeverity(match.severity) : match.severity;
+  const signalDelta = signalDeltaFromMatch(match);
+  const confidence = clampConfidence(
+    match.baseConfidence + (match.contextBonus ?? 0) + signalDelta + codePenalty
+  );
+  const policyDecision = resolvePolicyDecision(
+    match.category,
+    severity,
+    confidence,
+    options
+  );
 
   return {
     text: match.text,
+    normalizedText: match.normalizedText,
     category: match.category,
     severity,
-    confidence: confidenceFromMatch(match, insideCodeBlock),
+    confidence,
     startIndex: match.startIndex,
     endIndex: match.endIndex,
     suggestedMask: generateMask(match.text, match.category),
-    rule: match.rule
+    rule: match.rule,
+    validationStage: match.validationStage ?? 'validated',
+    decision: policyDecision.decision,
+    shadowDecision: policyDecision.shadowDecision,
+    scoreBreakdown: {
+      baseConfidence: match.baseConfidence,
+      contextBonus: match.contextBonus ?? 0,
+      signalDelta,
+      codePenalty,
+      finalConfidence: confidence
+    },
+    scoreSignals: match.scoreSignals ?? [],
+    countryHint: match.countryHint,
+    suppressedReason: match.suppressedReason
   };
 };
 
 const resolveOverlaps = (results: DetectionResult[]): DetectionResult[] => {
   const byPriority = [...results].sort((left, right) => {
+    const categoryGap =
+      CATEGORY_OVERLAP_PRIORITY[right.category] -
+      CATEGORY_OVERLAP_PRIORITY[left.category];
+    if (categoryGap !== 0) {
+      return categoryGap;
+    }
+
+    const decisionGap = DECISION_PRIORITY[right.decision] - DECISION_PRIORITY[left.decision];
+    if (decisionGap !== 0) {
+      return decisionGap;
+    }
+
     const severityGap = SEVERITY_PRIORITY[right.severity] - SEVERITY_PRIORITY[left.severity];
     if (severityGap !== 0) {
       return severityGap;
@@ -85,7 +149,8 @@ const dedupe = (results: DetectionResult[]): DetectionResult[] => {
       result.rule,
       result.startIndex,
       result.endIndex,
-      result.text
+      result.text,
+      result.decision
     ].join(':');
 
     if (!bySignature.has(signature)) {
@@ -135,6 +200,24 @@ const collectRawMatches = (input: string, options: DetectPIIOptions): RuleMatch[
   return matches;
 };
 
+const applyCategoryFilter = (
+  rawMatches: RuleMatch[],
+  options: DetectPIIOptions
+): RuleMatch[] => {
+  if (!options.enabledCategories?.length) {
+    return rawMatches;
+  }
+
+  const enabled = new Set(options.enabledCategories);
+  return rawMatches.filter((match) => enabled.has(match.category));
+};
+
+const applyValidationStage = (rawMatches: RuleMatch[]): RuleMatch[] =>
+  rawMatches.map((match) => ({
+    ...match,
+    validationStage: 'validated'
+  }));
+
 export const detectPII = (
   input: string,
   options: DetectPIIOptions = {}
@@ -143,17 +226,26 @@ export const detectPII = (
     return [];
   }
 
-  const rawMatches = collectRawMatches(input, options);
+  const rawMatches = applyCategoryFilter(collectRawMatches(input, options), options);
   if (!rawMatches.length) {
     return [];
   }
 
+  const validatedMatches = applyValidationStage(rawMatches);
   const codeRanges = getCodeBlockRanges(input);
 
-  const scored = rawMatches.map((match) => {
+  const scored = validatedMatches.map((match) => {
     const insideCodeBlock = isWithinCodeBlock(match, codeRanges);
-    return toDetectionResult(match, insideCodeBlock);
+    return toDetectionResult(match, insideCodeBlock, options);
   });
 
-  return resolveOverlaps(dedupe(scored));
+  return resolveOverlaps(
+    dedupe(
+      scored.filter(
+        (detection) =>
+          detection.decision !== 'ignore' ||
+          options.executionMode === 'shadow'
+      )
+    )
+  );
 };
