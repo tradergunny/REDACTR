@@ -5,6 +5,7 @@ import {
   pickByFallback,
   queryFirst
 } from './base';
+import type { IconPlacementConfig } from './types';
 
 const CHATGPT_URLS = [/^https:\/\/chatgpt\.com\//i, /^https:\/\/chat\.openai\.com\//i];
 
@@ -99,6 +100,20 @@ const pickHeuristicSendButton = (input: HTMLElement | null): HTMLButtonElement |
   return submitLike ?? candidates[0] ?? null;
 };
 
+const getComposerWrapper = (input: HTMLElement | null): HTMLElement | null => {
+  if (!input) {
+    return null;
+  }
+
+  const wrapper =
+    input.closest<HTMLElement>('.wcDTda_prosemirror-parent') ??
+    input.closest<HTMLElement>('[data-testid*="composer" i]') ??
+    input.closest<HTMLElement>('form, section, main, [role="main"]') ??
+    input.parentElement;
+
+  return wrapper ?? null;
+};
+
 export class ChatGPTAdapter extends BasePlatformAdapter {
   constructor() {
     super('chatgpt', 'ChatGPT', CHATGPT_URLS);
@@ -147,5 +162,21 @@ export class ChatGPTAdapter extends BasePlatformAdapter {
       () => queryFirst<HTMLButtonElement>(CHATGPT_BUTTON_SECONDARY),
       () => pickHeuristicSendButton(this.detectInputElement())
     ]);
+  }
+
+  getIconAnchor(): HTMLElement | null {
+    return getComposerWrapper(this.detectInputElement());
+  }
+
+  getIconPlacement(): IconPlacementConfig {
+    return {
+      placement: 'inside-right',
+      rightPx: 8,
+      bottomPx: 8
+    };
+  }
+
+  getInputAreaWrapper(): HTMLElement | null {
+    return getComposerWrapper(this.detectInputElement());
   }
 }

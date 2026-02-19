@@ -34,7 +34,7 @@
 - **Content Script**: DOM observation, text capture, UI injection, input/submit hooks.
 - **Platform Adapter**: Platform-specific selectors, input detection, submit interception, and rendering anchors.
 - **PII Detection Engine**: Regex rules, severity scoring, masking suggestions, and confidence scoring.
-- **Warning/Action UI**: Banner, highlights, modal confirm, and action buttons.
+- **Warning/Action UI**: Floating shield icon + popover detection panel, per-item redaction controls, submit blocking, confirmation modal.
 - **Service Worker**: Message hub, state coordination, settings sync, event buffer.
 - **Local Storage**: Persist settings, allowlist, and event logs.
 
@@ -59,9 +59,8 @@ interface PlatformAdapter {
   onTextChanged(callback: (text: string) => void): () => void;
   getSubmitButton(): HTMLElement | null;
   onSubmitIntercept(callback: (event: Event) => boolean): () => void;
-  getWarningAnchor(): HTMLElement | null;
-  renderWarning(warning: WarningConfig): HTMLElement;
-  renderInlineHighlight(range: TextRange, severity: Severity): void;
+  getIconAnchor(): HTMLElement | null;           // Input area wrapper where icon is appended as sibling
+  getInputAreaWrapper(): HTMLElement | null;      // Container for popover positioning reference
   cleanup(): void;
 }
 ```
@@ -82,19 +81,16 @@ interface DetectionResult {
 
 ### Event Schema
 ```typescript
-interface PIIEvent {
-  event_id: string;        // UUID
-  timestamp: string;       // ISO 8601
-  event_type: 'pii_detected' | 'pii_masked' | 'pii_allowed_once' |
-              'pii_allowlisted' | 'pii_edit_requested' | 'warning_dismissed';
-  platform: 'chatgpt' | 'claude';
-  category: PIICategory;
-  severity: Severity;
-  confidence: number;
-  prompt_length: number;   // Character count only
-  action_latency_ms: number;
-  session_id: string;
-}
+// See EVENT_SCHEMA.md for full event interfaces.
+// Summary of event types:
+type EventType =
+  | 'scan_completed'
+  | 'panel_opened' | 'panel_closed'
+  | 'pii_item_redacted' | 'pii_item_ignored' | 'pii_batch_redacted'
+  | 'submit_intercepted' | 'submit_confirmed' | 'send_anyway_confirmed'
+  | 'warning_dismissed'
+  | 'settings_changed' | 'pattern_allowlisted'
+  | 'dashboard_viewed';
 ```
 
 ## 4) Functional Requirements
@@ -111,32 +107,36 @@ interface PIIEvent {
 
 ### FR-B: Severity-based Warning Presentation
 - **Trigger**: >=1 detection result.
-- **UI**: Banner above input within 500ms, color by highest severity.
-- **Edge cases**: Multiple same-category items; rapid re-detection (no flicker).
+- **UI**: Shield icon outside input field activates with severity-colored glow + badge count. Clicking icon opens popover panel with severity summary pills and per-item detection cards.
+- **Edge cases**: Multiple same-category items (separate cards); rapid re-detection updates cards in place while panel remains open.
 - **Acceptance**:
-  - Visible without scrolling.
+  - Icon visible adjacent to input field on both platforms.
+  - Panel uses dark theme, Shadow DOM isolated.
   - ARIA labels and keyboard navigation.
-  - Shadow DOM isolation.
+  - Focus trap in panel when open.
 
 ### FR-C: Redaction/Masking
-- **Trigger**: User clicks "Mask & Send".
-- **Behavior**: Replace detected PII with masks, update input, auto-submit.
-- **Edge cases**: Overlapping detections; multi-line text.
+- **Trigger**: User clicks "Redact" on individual detection card, or "Redact All" in panel footer.
+- **Behavior**: Per-item redaction with selectable format (dropdown per card). Batch "Redact All" applies severity-driven defaults (Critical/High => token, Medium/Low => partial mask). "Send Redacted" applies all redactions to input text (reverse index order) then triggers platform submit.
+- **Edge cases**: Overlapping detections (reverse index processing); user changes format after redacting (undo then re-pick); multi-line text; re-scan persistence only for exact `category + text` matches.
 - **Acceptance**:
   - Non-PII text preserved exactly.
-  - Ctrl+Z restores original.
+  - Category-appropriate redaction format options available.
+  - Ctrl+Z restores original in input field.
+  - Undo available on each resolved card in panel.
 
 ### FR-D: Submit Interception
-- **Trigger**: Submit click or Enter with Critical/High detected.
-- **Behavior**: Prevent submit, show action buttons, Enter opens confirm modal.
-- **Edge cases**: Rapid submits (debounce 200ms); selector changes.
+- **Trigger**: Submit click or Enter with Critical/High PII detected and unresolved.
+- **Behavior**: Block submit, dim platform send button, clicking blocked send auto-opens REDACTR panel. User must resolve all Critical/High items (Redact or Ignore). "Send Anyway" for Critical/High uses confirmation modal and submits pending items as original text while keeping already-applied redactions. Medium/Low never block submit.
+- **Edge cases**: Rapid submits (debounce 200ms); user closes panel without resolving (submit stays blocked); platform changes submit mechanism; per-prompt decisions clear on submit or empty input.
 - **Acceptance**:
   - >=99% interception success.
   - No false blocks when no PII.
-  - User can always override.
+  - User can always override via Send Anyway → confirmation.
+  - Dimmed send button provides clear visual feedback.
 
 ### FR-E: Allowlist Controls
-- **Trigger**: "Always Allow" or Settings.
+- **Trigger**: Settings panel only (allowlisting is not available from the detection panel; "Ignore" in the panel is session-only).
 - **Storage**: `chrome.storage.sync`.
 - **Limits**: Cap 100 entries (FIFO eviction).
 - **Acceptance**:

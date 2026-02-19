@@ -1,287 +1,400 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  PlatformAdapter,
-  WarningConfig
-} from '../../src/content/adapters/types';
-import { WarningBanner } from '../../src/content/intervention/banner';
-import type { WarningViewModel } from '../../src/content/intervention/types';
+import { InterventionPanel } from '../../src/content/intervention/panel';
+import type { InterventionItem, InterventionViewModel, RedactionFormat } from '../../src/content/intervention/types';
+import type { DetectionResult } from '../../src/content/pii/types';
 
-const buildWarningSkeleton = (warning: WarningConfig): HTMLElement => {
-  const container = document.createElement('section');
-  container.setAttribute('data-redactr-warning', 'true');
-  container.setAttribute('data-severity', warning.severity);
+const formatOptions: RedactionFormat[] = [
+  { id: 'token', label: '[EMAIL]', mask: '[EMAIL]' },
+  { id: 'partial', label: 'j***@example.com', mask: 'j***@example.com' },
+  { id: 'redacted', label: '[REDACTED]', mask: '[REDACTED]' }
+];
 
-  const statusZone = document.createElement('div');
-  statusZone.setAttribute('data-redactr-zone', 'status');
-
-  const statusSummary = document.createElement('div');
-  statusSummary.setAttribute('data-redactr-status-summary', 'true');
-  statusZone.append(statusSummary);
-
-  const dismiss = document.createElement('button');
-  dismiss.type = 'button';
-  dismiss.setAttribute('data-redactr-action', 'dismiss');
-  dismiss.setAttribute('aria-label', 'Dismiss warning');
-  dismiss.textContent = '×';
-  statusZone.append(dismiss);
-
-  const findingsZone = document.createElement('div');
-  findingsZone.setAttribute('data-redactr-zone', 'findings');
-
-  const findings = document.createElement('div');
-  findings.setAttribute('data-redactr-warning-findings', 'true');
-  findingsZone.append(findings);
-
-  const actionsZone = document.createElement('div');
-  actionsZone.setAttribute('data-redactr-zone', 'actions');
-  actionsZone.setAttribute('data-redactr-warning-actions', 'true');
-
-  const buttonSpecs: Array<{ action: string; label: string; ariaLabel: string }> = [
-    {
-      action: 'mask_send',
-      label: 'Mask & Send',
-      ariaLabel: 'Mask sensitive data and send prompt'
-    },
-    {
-      action: 'edit_prompt',
-      label: 'Edit Prompt',
-      ariaLabel: 'Edit prompt and review highlighted sensitive data'
-    },
-    {
-      action: 'allow_once',
-      label: 'Allow Once',
-      ariaLabel: 'Allow this prompt once without masking'
-    },
-    {
-      action: 'always_allow',
-      label: 'Always Allow',
-      ariaLabel: 'Always allow this exact pattern in future prompts'
-    }
-  ];
-
-  for (const buttonSpec of buttonSpecs) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = buttonSpec.label;
-    button.setAttribute('data-redactr-action', buttonSpec.action);
-    button.setAttribute('aria-label', buttonSpec.ariaLabel);
-    actionsZone.append(button);
+const baseDetection: DetectionResult = {
+  text: 'john@example.com',
+  category: 'email',
+  severity: 'medium',
+  confidence: 0.91,
+  startIndex: 0,
+  endIndex: 16,
+  suggestedMask: 'j***@example.com',
+  rule: 'email.pattern',
+  validationStage: 'validated',
+  decision: 'warn',
+  scoreSignals: [],
+  scoreBreakdown: {
+    baseConfidence: 0.9,
+    contextBonus: 0,
+    signalDelta: 0.01,
+    codePenalty: 0,
+    finalConfidence: 0.91
   }
-
-  container.append(statusZone, findingsZone, actionsZone);
-  return container;
 };
 
-const createAdapter = (): PlatformAdapter => ({
+const buildItem = (overrides: Partial<InterventionItem> = {}): InterventionItem => ({
+  id: 'email:john@example.com:0',
+  identity: {
+    groupKey: 'email:john@example.com',
+    occurrence: 0,
+    key: 'email:john@example.com:0'
+  },
+  detection: baseDetection,
+  status: 'pending',
+  selectedFormatId: 'partial',
+  selectedMask: 'j***@example.com',
+  formats: formatOptions,
+  ...overrides
+});
+
+const buildModel = (items: InterventionItem[] = []): InterventionViewModel => ({
   platformId: 'chatgpt',
-  platformName: 'ChatGPT',
-  supportedUrls: [/^https:\/\/chatgpt\.com\//i],
-  detectInputElement: () => null,
-  getInputType: () => 'textarea',
-  captureText: () => '',
-  onTextChanged: () => () => undefined,
-  getSubmitButton: () => null,
-  onSubmitIntercept: () => () => undefined,
-  getWarningAnchor: () => document.body,
-  renderWarning: (warning: WarningConfig) => buildWarningSkeleton(warning),
-  renderInlineHighlight: () => undefined,
-  cleanup: () => undefined
+  items,
+  highestSeverity: items.length ? items[0].detection.severity : null,
+  pendingCount: items.filter((item) => item.status === 'pending').length,
+  redactedCount: items.filter((item) => item.status === 'redacted').length,
+  ignoredCount: items.filter((item) => item.status === 'ignored').length,
+  blockedPendingCount: items.filter(
+    (item) => item.status === 'pending' && (item.detection.severity === 'critical' || item.detection.severity === 'high')
+  ).length,
+  severityCounts: {
+    critical: items.filter((item) => item.detection.severity === 'critical').length,
+    high: items.filter((item) => item.detection.severity === 'high').length,
+    medium: items.filter((item) => item.detection.severity === 'medium').length,
+    low: items.filter((item) => item.detection.severity === 'low').length
+  }
 });
 
-const buildWarningModel = (
-  severity: WarningViewModel['severity'] = 'critical'
-): WarningViewModel => ({
-  severity,
-  blocking: severity === 'critical' || severity === 'high',
-  title: 'Sensitive data detected',
-  message: '2 findings detected',
-  findings: [
-    {
-      key: 'email:john@example.com:0:10:email.rule',
-      category: 'email',
-      severity: 'medium',
-      maskedPreview: 'j***@example.com',
-      confidence: 0.92
-    },
-    {
-      key: 'ssn:123-45-6789:12:23:ssn.rule',
-      category: 'ssn',
-      severity: 'critical',
-      maskedPreview: '***-**-6789',
-      confidence: 0.99
-    }
-  ]
-});
+const getIconShadow = (): ShadowRoot => {
+  const host = document.querySelector<HTMLElement>('[data-redactr-icon-host="true"]');
+  const shadow = host?.shadowRoot;
 
-describe('WarningBanner', () => {
+  if (!shadow) {
+    throw new Error('icon shadow root missing');
+  }
+
+  return shadow;
+};
+
+const getPanelShadow = (): ShadowRoot => {
+  const host = document.querySelector<HTMLElement>('[data-redactr-panel-host="true"]');
+  const shadow = host?.shadowRoot;
+
+  if (!shadow) {
+    throw new Error('panel shadow root missing');
+  }
+
+  return shadow;
+};
+
+describe('InterventionPanel', () => {
   beforeEach(() => {
     document.body.innerHTML = '<div id="anchor"></div>';
   });
 
-  it('renders grouped findings in one banner', () => {
+  it('renders idle icon state in shadow dom with z-index tiers in styles', () => {
+    const callbacks = {
+      onPanelOpened: vi.fn(),
+      onPanelClosed: vi.fn(),
+      onRedactItem: vi.fn(),
+      onIgnoreItem: vi.fn(),
+      onUndoItem: vi.fn(),
+      onRedactAll: vi.fn(),
+      onSubmitResolved: vi.fn(),
+      onSendAnyway: vi.fn(),
+      onReset: vi.fn()
+    };
+
+    const panel = new InterventionPanel(callbacks);
     const anchor = document.querySelector<HTMLElement>('#anchor');
     if (!anchor) {
-      throw new Error('anchor element missing');
+      throw new Error('anchor missing');
     }
 
-    const banner = new WarningBanner(createAdapter(), vi.fn());
-    banner.show(anchor, buildWarningModel());
-
-    const host = anchor.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    const shadow = host?.shadowRoot;
-    const zones = shadow?.querySelectorAll('[data-redactr-zone]');
-    const findings = shadow?.querySelectorAll('[data-redactr-finding-row="true"]');
-
-    expect(host).toBeTruthy();
-    expect(zones?.length).toBe(3);
-    expect(findings?.length).toBe(2);
-  });
-
-  it('renders status summary and disables dismiss for high severity', () => {
-    const anchor = document.querySelector<HTMLElement>('#anchor');
-    if (!anchor) {
-      throw new Error('anchor element missing');
-    }
-
-    const banner = new WarningBanner(createAdapter(), vi.fn());
-    banner.show(anchor, buildWarningModel('high'));
-
-    const host = anchor
-      .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
-      ?.shadowRoot;
-    const summary = host?.querySelector<HTMLElement>('[data-redactr-status-summary="true"]');
-    const dismissButton = host?.querySelector<HTMLButtonElement>(
-      'button[data-redactr-action="dismiss"]'
-    );
-
-    expect(summary?.textContent).toContain('2 sensitive items');
-    expect(summary?.textContent).toContain('High');
-    expect(dismissButton?.disabled).toBe(true);
-  });
-
-  it('sets aria labels on all interactive controls', () => {
-    const anchor = document.querySelector<HTMLElement>('#anchor');
-    if (!anchor) {
-      throw new Error('anchor element missing');
-    }
-
-    const banner = new WarningBanner(createAdapter(), vi.fn());
-    banner.show(anchor, buildWarningModel());
-
-    const controls = anchor
-      .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
-      ?.shadowRoot?.querySelectorAll<HTMLButtonElement>('button[data-redactr-action]');
-
-    expect(controls?.length).toBe(5);
-
-    controls?.forEach((button) => {
-      expect(button.getAttribute('aria-label')).toBeTruthy();
+    panel.mount({
+      iconAnchor: anchor,
+      panelPortalRoot: document.documentElement
     });
+    panel.update(buildModel([]));
+
+    const iconShadow = getIconShadow();
+    const panelShadow = getPanelShadow();
+    const icon = iconShadow.querySelector<HTMLElement>('[data-redactr-icon="true"]');
+    const iconStyle = iconShadow.querySelector('style');
+    const panelStyle = panelShadow.querySelector('style');
+
+    expect(icon?.getAttribute('data-state')).toBe('idle');
+    expect(iconStyle?.textContent).toContain('z-index: 2147483000');
+    expect(panelStyle?.textContent).toContain('z-index: 2147483005');
+    expect(panelStyle?.textContent).toContain('z-index: 2147483010');
+    expect(panelStyle?.textContent).toContain('TODO: light theme support');
+
+    panel.cleanup();
   });
 
-  it('renders 4 rows + overflow expander for 5 findings and expands on click', () => {
+  it('keeps icon inside clipping anchors to avoid overflow cut-off', () => {
+    const callbacks = {
+      onPanelOpened: vi.fn(),
+      onPanelClosed: vi.fn(),
+      onRedactItem: vi.fn(),
+      onIgnoreItem: vi.fn(),
+      onUndoItem: vi.fn(),
+      onRedactAll: vi.fn(),
+      onSubmitResolved: vi.fn(),
+      onSendAnyway: vi.fn(),
+      onReset: vi.fn()
+    };
+
+    const panel = new InterventionPanel(callbacks);
     const anchor = document.querySelector<HTMLElement>('#anchor');
     if (!anchor) {
-      throw new Error('anchor element missing');
+      throw new Error('anchor missing');
     }
 
-    const findings: WarningViewModel['findings'] = Array.from({ length: 5 }, (_, index) => ({
-      key: `email:john${index}@example.com:${index}:email.rule`,
-      category: 'email' as const,
-      severity: index === 4 ? 'high' : 'medium',
-      maskedPreview: `j***${index}@example.com`,
-      confidence: 0.9
-    }));
+    anchor.style.overflow = 'auto';
 
-    const banner = new WarningBanner(createAdapter(), vi.fn());
-    banner.show(anchor, {
-      severity: 'high',
-      blocking: true,
-      title: 'Sensitive data detected',
-      message: '5 findings detected',
-      findings
+    panel.mount({
+      iconAnchor: anchor,
+      panelPortalRoot: document.documentElement
+    });
+    panel.update(buildModel([]));
+
+    const iconShadow = getIconShadow();
+    const icon = iconShadow.querySelector<HTMLElement>('[data-redactr-icon="true"]');
+
+    expect(icon?.style.right).toBe('8px');
+
+    panel.cleanup();
+  });
+
+  it('shows badge and toggles panel open/close from icon', () => {
+    const callbacks = {
+      onPanelOpened: vi.fn(),
+      onPanelClosed: vi.fn(),
+      onRedactItem: vi.fn(),
+      onIgnoreItem: vi.fn(),
+      onUndoItem: vi.fn(),
+      onRedactAll: vi.fn(),
+      onSubmitResolved: vi.fn(),
+      onSendAnyway: vi.fn(),
+      onReset: vi.fn()
+    };
+
+    const panel = new InterventionPanel(callbacks);
+    const anchor = document.querySelector<HTMLElement>('#anchor');
+    if (!anchor) {
+      throw new Error('anchor missing');
+    }
+
+    panel.mount({
+      iconAnchor: anchor,
+      panelPortalRoot: document.documentElement
+    });
+    panel.update(buildModel([buildItem()]));
+
+    const iconShadow = getIconShadow();
+    const panelShadow = getPanelShadow();
+    const icon = iconShadow.querySelector<HTMLButtonElement>('button[data-redactr-icon="true"]');
+    const panelElement = panelShadow.querySelector<HTMLElement>('[data-redactr-panel="true"]');
+
+    if (!icon || !panelElement) {
+      throw new Error('icon/panel missing');
+    }
+
+    expect(iconShadow.querySelector('[data-redactr-badge="true"]')?.textContent).toBe('1');
+
+    icon.click();
+    expect(callbacks.onPanelOpened).toHaveBeenCalledWith('icon_click');
+    expect(panelElement.hasAttribute('hidden')).toBe(false);
+
+    icon.click();
+    expect(callbacks.onPanelClosed).toHaveBeenCalled();
+    expect(panelElement.getAttribute('hidden')).toBe('true');
+
+    panel.cleanup();
+  });
+
+  it('closes on outside click and Escape', () => {
+    const callbacks = {
+      onPanelOpened: vi.fn(),
+      onPanelClosed: vi.fn(),
+      onRedactItem: vi.fn(),
+      onIgnoreItem: vi.fn(),
+      onUndoItem: vi.fn(),
+      onRedactAll: vi.fn(),
+      onSubmitResolved: vi.fn(),
+      onSendAnyway: vi.fn(),
+      onReset: vi.fn()
+    };
+
+    const panel = new InterventionPanel(callbacks);
+    const anchor = document.querySelector<HTMLElement>('#anchor');
+    if (!anchor) {
+      throw new Error('anchor missing');
+    }
+
+    panel.mount({
+      iconAnchor: anchor,
+      panelPortalRoot: document.documentElement
+    });
+    panel.update(buildModel([buildItem()]));
+
+    const iconShadow = getIconShadow();
+    const icon = iconShadow.querySelector<HTMLButtonElement>('button[data-redactr-icon="true"]');
+    if (!icon) {
+      throw new Error('icon missing');
+    }
+
+    icon.click();
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    expect(callbacks.onPanelClosed).toHaveBeenCalled();
+
+    icon.click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(callbacks.onPanelClosed).toHaveBeenCalledTimes(2);
+
+    panel.cleanup();
+  });
+
+  it('shows explicit send-anyway modal copy for critical/high', () => {
+    const callbacks = {
+      onPanelOpened: vi.fn(),
+      onPanelClosed: vi.fn(),
+      onRedactItem: vi.fn(),
+      onIgnoreItem: vi.fn(),
+      onUndoItem: vi.fn(),
+      onRedactAll: vi.fn(),
+      onSubmitResolved: vi.fn(),
+      onSendAnyway: vi.fn(),
+      onReset: vi.fn()
+    };
+
+    const criticalItem = buildItem({
+      id: 'ssn:123-45-6789:0',
+      identity: {
+        groupKey: 'ssn:123-45-6789',
+        occurrence: 0,
+        key: 'ssn:123-45-6789:0'
+      },
+      detection: {
+        ...baseDetection,
+        text: '123-45-6789',
+        category: 'ssn',
+        severity: 'critical',
+        confidence: 0.99,
+        suggestedMask: '***-**-6789'
+      },
+      selectedFormatId: 'token',
+      selectedMask: '[SSN]',
+      formats: [
+        { id: 'token', label: '[SSN]', mask: '[SSN]' },
+        { id: 'partial', label: '***-**-6789', mask: '***-**-6789' },
+        { id: 'redacted', label: '[REDACTED]', mask: '[REDACTED]' }
+      ]
     });
 
-    const shadow = anchor
-      .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
-      ?.shadowRoot;
-
-    const initialRows = shadow?.querySelectorAll('[data-redactr-finding-row="true"]');
-    const expandButton = shadow?.querySelector<HTMLButtonElement>(
-      'button[data-redactr-expand-findings="true"]'
-    );
-
-    expect(initialRows?.length).toBe(4);
-    expect(expandButton?.textContent).toBe('+ 1 more');
-
-    expandButton?.click();
-
-    const expandedRows = shadow?.querySelectorAll('[data-redactr-finding-row="true"]');
-    const afterExpandButton = shadow?.querySelector('button[data-redactr-expand-findings="true"]');
-    expect(expandedRows?.length).toBe(5);
-    expect(afterExpandButton).toBeNull();
-  });
-
-  it('handles Enter for focused action and Escape to dismiss', () => {
+    const panel = new InterventionPanel(callbacks);
     const anchor = document.querySelector<HTMLElement>('#anchor');
     if (!anchor) {
-      throw new Error('anchor element missing');
+      throw new Error('anchor missing');
     }
 
-    const onAction = vi.fn();
-    const banner = new WarningBanner(createAdapter(), onAction);
-    banner.show(anchor, buildWarningModel('medium'));
+    panel.mount({
+      iconAnchor: anchor,
+      panelPortalRoot: document.documentElement
+    });
+    panel.update(buildModel([criticalItem]));
 
-    const warning = anchor
-      .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
-      ?.shadowRoot?.querySelector<HTMLElement>('[data-redactr-warning="true"]');
+    const iconShadow = getIconShadow();
+    const panelShadow = getPanelShadow();
+    const icon = iconShadow.querySelector<HTMLButtonElement>('button[data-redactr-icon="true"]');
+    icon?.click();
 
-    const maskButton = warning?.querySelector<HTMLButtonElement>(
-      'button[data-redactr-action="mask_send"]'
-    );
+    const sendAnyway = panelShadow.querySelector<HTMLButtonElement>('[data-redactr-footer="true"] button[data-redactr-muted="true"]');
+    sendAnyway?.click();
 
-    if (!warning || !maskButton) {
-      throw new Error('warning or action button missing');
-    }
+    const modalText = panelShadow.querySelector('[data-redactr-modal-body="true"]')?.textContent ?? '';
 
-    maskButton.focus();
-    warning.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    warning.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(modalText).toContain('Pending items will be sent as original text');
+    expect(modalText).toContain('already applied will stay applied');
 
-    expect(onAction).toHaveBeenCalledWith('mask_send');
-    expect(onAction).toHaveBeenCalledWith('dismiss');
+    panel.cleanup();
   });
 
-  it('ignores Escape dismiss when severity is high', () => {
+  it('positions panel above icon when there is insufficient viewport space below', () => {
+    const callbacks = {
+      onPanelOpened: vi.fn(),
+      onPanelClosed: vi.fn(),
+      onRedactItem: vi.fn(),
+      onIgnoreItem: vi.fn(),
+      onUndoItem: vi.fn(),
+      onRedactAll: vi.fn(),
+      onSubmitResolved: vi.fn(),
+      onSendAnyway: vi.fn(),
+      onReset: vi.fn()
+    };
+
+    const panel = new InterventionPanel(callbacks);
     const anchor = document.querySelector<HTMLElement>('#anchor');
     if (!anchor) {
-      throw new Error('anchor element missing');
+      throw new Error('anchor missing');
     }
 
-    const onAction = vi.fn();
-    const banner = new WarningBanner(createAdapter(), onAction);
-    banner.show(anchor, buildWarningModel('high'));
+    panel.mount({
+      iconAnchor: anchor,
+      panelPortalRoot: document.documentElement
+    });
+    panel.update(buildModel([buildItem()]));
 
-    const warning = anchor
-      .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
-      ?.shadowRoot?.querySelector<HTMLElement>('[data-redactr-warning="true"]');
+    const iconShadow = getIconShadow();
+    const panelShadow = getPanelShadow();
+    const icon = iconShadow.querySelector<HTMLButtonElement>('button[data-redactr-icon="true"]');
+    const panelElement = panelShadow.querySelector<HTMLDivElement>('[data-redactr-panel="true"]');
 
-    warning?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(onAction).not.toHaveBeenCalledWith('dismiss');
-  });
-
-  it('attaches content into Shadow DOM for style isolation', () => {
-    const anchor = document.querySelector<HTMLElement>('#anchor');
-    if (!anchor) {
-      throw new Error('anchor element missing');
+    if (!icon || !panelElement) {
+      throw new Error('icon/panel missing');
     }
 
-    const banner = new WarningBanner(createAdapter(), vi.fn());
-    banner.show(anchor, buildWarningModel('low'));
+    const initialViewportHeight = window.innerHeight;
 
-    const host = anchor.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    expect(host?.shadowRoot).toBeTruthy();
-    expect(host?.shadowRoot?.querySelector('style')).toBeTruthy();
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 480
+    });
+
+    vi.spyOn(icon, 'getBoundingClientRect').mockReturnValue({
+      x: 900,
+      y: 430,
+      width: 28,
+      height: 28,
+      top: 430,
+      right: 928,
+      bottom: 458,
+      left: 900,
+      toJSON: () => ({})
+    } as DOMRect);
+
+    vi.spyOn(panelElement, 'getBoundingClientRect').mockReturnValue({
+      x: 560,
+      y: 0,
+      width: 360,
+      height: 320,
+      top: 0,
+      right: 920,
+      bottom: 320,
+      left: 560,
+      toJSON: () => ({})
+    } as DOMRect);
+
+    icon.click();
+
+    const topValue = Number((panelElement.style.top || '0').replace('px', ''));
+    expect(topValue).toBeLessThan(430);
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: initialViewportHeight
+    });
+
+    panel.cleanup();
   });
 });

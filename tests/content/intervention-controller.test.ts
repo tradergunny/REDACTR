@@ -1,11 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  PlatformAdapter,
-  WarningConfig
-} from '../../src/content/adapters/types';
-import type { DetectionResult } from '../../src/content/pii/types';
+import type { PlatformAdapter } from '../../src/content/adapters/types';
 import { InterventionController } from '../../src/content/intervention/controller';
+import type { DetectionResult } from '../../src/content/pii/types';
+import type { PIIEvent } from '../../src/shared/events';
 
 const flushAsync = async (): Promise<void> => {
   await Promise.resolve();
@@ -44,69 +42,27 @@ const createChromeMock = (): typeof chrome => {
   } as unknown as typeof chrome;
 };
 
-const createWarningSkeleton = (warning: WarningConfig): HTMLElement => {
-  const section = document.createElement('section');
-  section.setAttribute('data-redactr-warning', 'true');
-  section.setAttribute('data-severity', warning.severity);
-
-  const statusZone = document.createElement('div');
-  statusZone.setAttribute('data-redactr-zone', 'status');
-
-  const statusSummary = document.createElement('div');
-  statusSummary.setAttribute('data-redactr-status-summary', 'true');
-  statusZone.append(statusSummary);
-
-  const dismiss = document.createElement('button');
-  dismiss.type = 'button';
-  dismiss.textContent = '×';
-  dismiss.setAttribute('data-redactr-action', 'dismiss');
-  dismiss.setAttribute('aria-label', 'Dismiss warning');
-  statusZone.append(dismiss);
-
-  const findingsZone = document.createElement('div');
-  findingsZone.setAttribute('data-redactr-zone', 'findings');
-
-  const findings = document.createElement('div');
-  findings.setAttribute('data-redactr-warning-findings', 'true');
-  findingsZone.append(findings);
-
-  const actionsZone = document.createElement('div');
-  actionsZone.setAttribute('data-redactr-zone', 'actions');
-  actionsZone.setAttribute('data-redactr-warning-actions', 'true');
-
-  const actionKeys = ['mask_send', 'edit_prompt', 'allow_once', 'always_allow'];
-  for (const actionKey of actionKeys) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.setAttribute('data-redactr-action', actionKey);
-    button.setAttribute('aria-label', actionKey);
-    button.textContent = actionKey;
-    actionsZone.append(button);
-  }
-
-  section.append(statusZone, findingsZone, actionsZone);
-  return section;
-};
-
 interface ControllerFixture {
-  adapter: PlatformAdapter;
   controller: InterventionController;
+  input: HTMLTextAreaElement;
+  submitButton: HTMLButtonElement;
   submitSpy: ReturnType<typeof vi.fn>;
-  events: Array<{ event_type: string }>;
+  events: PIIEvent[];
 }
 
 const setupController = (): ControllerFixture => {
   document.body.innerHTML = `
-    <div id="anchor"></div>
-    <textarea id="prompt-textarea"></textarea>
-    <button id="send-button">Send</button>
+    <div id="composer-wrapper">
+      <textarea id="prompt-textarea"></textarea>
+      <button id="send-button">Send</button>
+    </div>
   `;
 
   const input = document.querySelector<HTMLTextAreaElement>('#prompt-textarea');
   const submitButton = document.querySelector<HTMLButtonElement>('#send-button');
-  const anchor = document.querySelector<HTMLElement>('#anchor');
+  const wrapper = document.querySelector<HTMLElement>('#composer-wrapper');
 
-  if (!input || !submitButton || !anchor) {
+  if (!input || !submitButton || !wrapper) {
     throw new Error('fixture elements missing');
   }
 
@@ -123,25 +79,27 @@ const setupController = (): ControllerFixture => {
     onTextChanged: () => () => undefined,
     getSubmitButton: () => submitButton,
     onSubmitIntercept: () => () => undefined,
-    getWarningAnchor: () => anchor,
-    renderWarning: (warning: WarningConfig) => createWarningSkeleton(warning),
+    getIconAnchor: () => wrapper,
+    getIconPlacement: () => ({ placement: 'inside-right', rightPx: 8, bottomPx: 8 }),
+    getInputAreaWrapper: () => wrapper,
     renderInlineHighlight: () => undefined,
     cleanup: () => undefined
   };
 
-  const events: Array<{ event_type: string }> = [];
+  const events: PIIEvent[] = [];
 
   const controller = new InterventionController({
     adapter,
     sessionId: 'session_1',
     sendEvent: async (event) => {
-      events.push({ event_type: event.event_type });
+      events.push(event);
     }
   });
 
   return {
-    adapter,
     controller,
+    input,
+    submitButton,
     submitSpy,
     events
   };
@@ -189,8 +147,49 @@ const mediumDetection: DetectionResult = {
   }
 };
 
+const getPanelShadowRoot = (): ShadowRoot => {
+  const host = document.querySelector<HTMLElement>('[data-redactr-panel-host="true"]');
+  const shadow = host?.shadowRoot;
+
+  if (!shadow) {
+    throw new Error('panel shadow root missing');
+  }
+
+  return shadow;
+};
+
+const getIconShadowRoot = (): ShadowRoot => {
+  const host = document.querySelector<HTMLElement>('[data-redactr-icon-host="true"]');
+  const shadow = host?.shadowRoot;
+
+  if (!shadow) {
+    throw new Error('icon shadow root missing');
+  }
+
+  return shadow;
+};
+
+const openPanelByIcon = (): ShadowRoot => {
+  const iconShadow = getIconShadowRoot();
+  const shadow = getPanelShadowRoot();
+  const icon = iconShadow.querySelector<HTMLButtonElement>('button[data-redactr-icon="true"]');
+
+  if (!icon) {
+    throw new Error('icon missing');
+  }
+
+  icon.click();
+  return shadow;
+};
+
 describe('InterventionController', () => {
   beforeEach(() => {
+    for (const host of document.querySelectorAll<HTMLElement>(
+      '[data-redactr-panel-host=\"true\"], [data-redactr-icon-host=\"true\"]'
+    )) {
+      host.remove();
+    }
+
     Object.defineProperty(globalThis, 'chrome', {
       value: createChromeMock(),
       configurable: true
@@ -198,16 +197,24 @@ describe('InterventionController', () => {
     document.body.innerHTML = '';
   });
 
-  it('blocks submit for critical/high detections', () => {
-    const { controller } = setupController();
+  it('blocks submit for unresolved critical/high detections and opens panel', async () => {
+    const { controller, events, submitButton } = setupController();
 
     controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
 
     const result = controller.onSubmitAttempt(new Event('click'));
+    await flushAsync();
+
+    const panel = getPanelShadowRoot().querySelector<HTMLElement>('[data-redactr-panel="true"]');
+
     expect(result).toBe(false);
+    expect(panel?.hasAttribute('hidden')).toBe(false);
+    expect(submitButton.getAttribute('data-redactr-submit-dimmed')).toBe('true');
+    expect(events.some((event) => event.event_type === 'submit_intercepted')).toBe(true);
+    expect(events.some((event) => event.event_type === 'panel_opened')).toBe(true);
   });
 
-  it('does not block submit for medium/low detections', () => {
+  it('does not block submit for medium-only detections', () => {
     const { controller } = setupController();
 
     controller.onScanResult('email john@example.com', [mediumDetection]);
@@ -216,19 +223,83 @@ describe('InterventionController', () => {
     expect(result).toBe(true);
   });
 
-  it('does not block submit when no detections exist', () => {
+  it('preserves resolved state on exact-match rescan and resets on text change', async () => {
     const { controller } = setupController();
 
-    controller.onScanResult('clean prompt', []);
+    controller.onScanResult('email john@example.com', [mediumDetection]);
 
-    const result = controller.onSubmitAttempt(new Event('click'));
-    expect(result).toBe(true);
+    let shadow = openPanelByIcon();
+    const redactButton = shadow.querySelector<HTMLButtonElement>('[data-redactr-card="true"] button[data-redactr-primary="true"]');
+    if (!redactButton) {
+      throw new Error('redact button missing');
+    }
+
+    redactButton.click();
+    await flushAsync();
+
+    controller.onScanResult('email john@example.com', [mediumDetection]);
+    shadow = getPanelShadowRoot();
+
+    expect(shadow.textContent).toContain('Undo');
+
+    controller.onScanResult('email john2@example.com', [
+      {
+        ...mediumDetection,
+        text: 'john2@example.com',
+        startIndex: 6,
+        endIndex: 23,
+        suggestedMask: 'j***@example.com'
+      }
+    ]);
+
+    shadow = getPanelShadowRoot();
+    expect(shadow.textContent).toContain('Redact');
+    expect(shadow.textContent).not.toContain('Undo');
   });
 
-  it('masks detections in reverse order and submits', async () => {
+  it('clears per-item state after submit; ignored item is flagged again in new prompt', async () => {
     const { controller, submitSpy } = setupController();
 
+    controller.onScanResult('email john@example.com', [mediumDetection]);
+
+    let shadow = openPanelByIcon();
+
+    const ignoreButton = shadow.querySelector<HTMLButtonElement>('[data-redactr-card="true"] button[data-redactr-muted="true"]');
+    if (!ignoreButton) {
+      throw new Error('ignore button missing');
+    }
+
+    ignoreButton.click();
+    await flushAsync();
+
+    const sendOriginal = shadow.querySelector<HTMLButtonElement>('[data-redactr-footer="true"] button[data-redactr-primary="true"]');
+    if (!sendOriginal) {
+      throw new Error('send original button missing');
+    }
+
+    sendOriginal.click();
+    await flushAsync();
+
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+
+    controller.onScanResult('email john@example.com', [mediumDetection]);
+    shadow = getPanelShadowRoot();
+
+    const icon = getIconShadowRoot().querySelector<HTMLButtonElement>('button[data-redactr-icon="true"]');
+    icon?.click();
+
+    expect(shadow.textContent).toContain('Redact');
+    expect(
+      shadow.querySelector('[data-redactr-resolved="true"][data-status="ignored"]')
+    ).toBeNull();
+  });
+
+  it('send anyway keeps pending items original while preserving already-redacted items', async () => {
+    const { controller, input, submitSpy, events } = setupController();
+
     const text = 'email john@example.com ssn 123-45-6789';
+    input.value = text;
+
     const detections: DetectionResult[] = [
       {
         ...mediumDetection,
@@ -244,116 +315,55 @@ describe('InterventionController', () => {
 
     controller.onScanResult(text, detections);
 
-    const host = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    const maskButton = host?.shadowRoot?.querySelector<HTMLButtonElement>(
-      'button[data-redactr-action="mask_send"]'
+    const shadow = openPanelByIcon();
+
+    const cardButtons = shadow.querySelectorAll<HTMLButtonElement>(
+      '[data-redactr-card="true"] button[data-redactr-primary="true"]'
     );
 
-    if (!maskButton) {
-      throw new Error('mask button missing');
+    if (cardButtons.length < 1) {
+      throw new Error('redact buttons missing');
     }
 
-    maskButton.click();
+    cardButtons[0].click();
     await flushAsync();
 
-    const input = document.querySelector<HTMLTextAreaElement>('#prompt-textarea');
-    expect(input?.value).toBe('email j***@example.com ssn ***-**-6789');
+    const sendAnyway = shadow.querySelector<HTMLButtonElement>(
+      '[data-redactr-footer="true"] button[data-redactr-muted="true"]'
+    );
+
+    if (!sendAnyway) {
+      throw new Error('send anyway button missing');
+    }
+
+    sendAnyway.click();
+
+    const confirm = shadow.querySelector<HTMLButtonElement>(
+      '[data-redactr-modal="true"] button[data-redactr-destructive="true"]'
+    );
+
+    if (!confirm) {
+      throw new Error('send anyway confirmation button missing');
+    }
+
+    confirm.click();
+    await flushAsync();
+
+    expect(input.value).toBe('email j***@example.com ssn 123-45-6789');
     expect(submitSpy).toHaveBeenCalledTimes(1);
+    expect(events.some((event) => event.event_type === 'send_anyway_confirmed')).toBe(true);
+    expect(events.some((event) => event.event_type === 'submit_confirmed')).toBe(true);
   });
 
-  it('suppresses same detection for Allow This Time in session', async () => {
+  it('clears state when input becomes empty', () => {
     const { controller } = setupController();
 
-    controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
+    controller.onScanResult('email john@example.com', [mediumDetection]);
+    controller.onScanResult('', []);
 
-    const host = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    const allowOnceButton = host?.shadowRoot?.querySelector<HTMLButtonElement>(
-      'button[data-redactr-action="allow_once"]'
-    );
+    const shadow = getIconShadowRoot();
+    const badge = shadow.querySelector('[data-redactr-badge="true"]');
 
-    if (!allowOnceButton) {
-      throw new Error('allow once button missing');
-    }
-
-    allowOnceButton.click();
-    await flushAsync();
-
-    controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
-
-    const nextHost = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    expect(nextHost).toBeNull();
-  });
-
-  it('persists Always Allow and suppresses detection immediately', async () => {
-    const { controller, events } = setupController();
-
-    controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
-
-    const host = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    const alwaysAllowButton = host?.shadowRoot?.querySelector<HTMLButtonElement>(
-      'button[data-redactr-action="always_allow"]'
-    );
-
-    if (!alwaysAllowButton) {
-      throw new Error('always allow button missing');
-    }
-
-    alwaysAllowButton.click();
-    await vi.waitFor(() =>
-      expect(
-        events.some((event) => event.event_type === 'pii_allowlisted')
-      ).toBe(true)
-    );
-
-    controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
-
-    const nextHost = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    expect(nextHost).toBeNull();
-  });
-
-  it('uses bypass flag to avoid immediate recursive submit block', async () => {
-    const { controller } = setupController();
-
-    controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
-
-    const host = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    const maskButton = host?.shadowRoot?.querySelector<HTMLButtonElement>(
-      'button[data-redactr-action="mask_send"]'
-    );
-
-    if (!maskButton) {
-      throw new Error('mask button missing');
-    }
-
-    maskButton.click();
-    await flushAsync();
-
-    controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
-
-    expect(controller.onSubmitAttempt(new Event('click'))).toBe(true);
-  });
-
-  it('keeps dismiss disabled for critical findings and still blocks submit', async () => {
-    const { controller, events } = setupController();
-
-    controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
-
-    const host = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    const dismissButton = host?.shadowRoot?.querySelector<HTMLButtonElement>(
-      'button[data-redactr-action="dismiss"]'
-    );
-
-    if (!dismissButton) {
-      throw new Error('dismiss button missing');
-    }
-
-    expect(dismissButton.disabled).toBe(true);
-    dismissButton.click();
-    await flushAsync();
-
-    expect(controller.onSubmitAttempt(new Event('click'))).toBe(false);
-    const nextHost = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
-    expect(nextHost).toBeTruthy();
-    expect(events.some((event) => event.event_type === 'warning_dismissed')).toBe(false);
+    expect(badge).toBeNull();
   });
 });

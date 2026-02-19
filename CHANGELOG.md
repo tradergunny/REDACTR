@@ -4,31 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 - Implemented Phase 4 Intervention UX & Submit Control:
-  - Added a new intervention module in the content script:
-    - `src/content/intervention/types.ts` for action/view contracts, severity helpers, and detection signatures.
-    - `src/content/intervention/banner.ts` for Shadow DOM warning rendering, grouped findings, severity color coding, keyboard controls, and ARIA-labeled action controls.
-    - `src/content/intervention/controller.ts` for submit-blocking state machine, allow-once suppression, persistent allowlist enforcement, action handling, and auto-submit flow.
-  - Wired intervention flow into `src/content/index.ts`:
-    - real-time detection now updates intervention state
-    - submit interception delegates to controller logic
-    - cleanup includes intervention teardown.
-  - Expanded platform adapter UI behavior in `src/content/adapters/base.ts`:
-    - real warning skeleton rendering via `renderWarning(...)`
-    - lightweight inline highlighting for textarea/input and contenteditable ranges.
-  - Added allowlist persistence helpers in `src/shared/storage.ts`:
-    - `ALLOWLIST_ENTRIES_KEY`
-    - `ALLOWLIST_MAX_ENTRIES` (100, FIFO)
-    - `AllowlistEntry`, `getAllowlistEntries()`, `addAllowlistEntries()`, and `isDetectionAllowlisted(...)`.
-  - Added intervention event factory support in `src/shared/events.ts`:
-    - `createPIIActionEvent(...)` for `pii_masked`, `pii_edit_requested`, `pii_allowed_once`, `warning_dismissed`, `submit_intercepted`, and `pii_allowlisted`.
-  - Added Phase 4 test coverage:
-    - `tests/content/banner.test.ts` for grouped banner rendering, severity colors, ARIA coverage, keyboard controls, and Shadow DOM.
-    - `tests/content/intervention-controller.test.ts` for blocking/non-blocking submit behavior, mask-and-send replacement, allow-once, always-allow persistence, bypass flow, and dismiss semantics.
-    - Updated `tests/pii/events.test.ts` for action event factory validation.
-    - Updated `tests/adapters/hooks.test.ts` to validate inline highlight behavior.
-  - Improved phone detection coverage for Thai local mobile numbers:
-    - plain Thai mobile formats without separators (for example `0853236132`, `0961234567`) now trigger `phone` detection.
-    - added corpus tests to lock this behavior.
+  - Rebuilt intervention UI from legacy inline banner to floating icon + Shadow DOM popover panel:
+    - removed legacy `src/content/intervention/banner.ts`
+    - added `src/content/intervention/panel.ts` for icon, panel, modal, focus trap, outside/Escape dismissal, and viewport-aware positioning.
+  - Refactored intervention state flow in `src/content/intervention/controller.ts`:
+    - per-item state map with statuses (`pending`/`redacted`/`ignored`)
+    - live in-place re-scan while panel stays open
+    - state persistence only for exact `category + text` matches
+    - per-prompt-only ignore behavior (cleared on submit or empty input)
+    - submit blocking for unresolved Critical/High with dimmed native send button.
+  - Added redaction format policy in `src/content/intervention/redaction-formats.ts`:
+    - exactly 3 options per category (token, partial, `[REDACTED]`)
+    - severity-based defaults (Critical/High => token, Medium/Low => partial).
+  - Updated adapter contracts and implementations:
+    - replaced `getWarningAnchor()` with `getIconAnchor()`
+    - added `getInputAreaWrapper()`
+    - removed legacy warning rendering from adapter layer.
+  - Migrated event model in `src/shared/events.ts` to redesigned schema:
+    - removed deprecated Phase 4 events (`pii_masked`, `pii_allowed_once`, `pii_allowlisted`, `pii_edit_requested`, `warning_shown`)
+    - added/normalized `panel_opened`, `panel_closed`, `pii_item_redacted`, `pii_item_ignored`, `pii_batch_redacted`, `submit_confirmed`, `send_anyway_confirmed`
+    - extended `scan_completed` with `detection_count`.
+  - Updated content-script wiring in `src/content/index.ts`:
+    - `scan_completed` now includes detection count
+    - UI anchor sync is refreshed during adapter rebind to survive platform rerenders.
+  - Reworked Phase 4 tests:
+    - `tests/content/banner.test.ts` now validates icon/panel/modal behaviors, z-index tiers, dismissal controls, and flip positioning.
+    - `tests/content/intervention-controller.test.ts` now validates live re-scan state preservation rules, per-prompt resets, submit blocking, and send-anyway semantics.
+    - updated `tests/pii/events.test.ts` and adapter selector tests for the new contracts.
 
 - Implemented Phase 3 PII Detection Engine:
   - Added full PII detection contracts and rule registry with 11 categories: `credit_card`, `bank_account`, `ssn`, `api_key`, `password`, `passport`, `national_id`, `email`, `phone`, `employee_name`, and `address`.

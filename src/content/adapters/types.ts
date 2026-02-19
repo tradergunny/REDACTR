@@ -1,29 +1,20 @@
-import type { DetectionDecision, PIICategory } from '../pii/types';
-
 export type PlatformId = 'chatgpt' | 'claude';
 
 export type InputType = 'textarea' | 'contenteditable' | 'input';
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
+export type IconPlacement = 'inside-right' | 'outside-right';
+
+export interface IconPlacementConfig {
+  placement: IconPlacement;
+  rightPx?: number;
+  bottomPx?: number;
+}
+
 export interface TextRange {
   startIndex: number;
   endIndex: number;
-}
-
-export interface WarningConfig {
-  severity: Severity;
-  blocking?: boolean;
-  title?: string;
-  message?: string;
-  findings?: {
-    key: string;
-    category: PIICategory;
-    severity: Severity;
-    maskedPreview: string;
-    confidence: number;
-    decision?: DetectionDecision;
-  }[];
 }
 
 export interface PlatformAdapter {
@@ -37,8 +28,9 @@ export interface PlatformAdapter {
   onTextChanged(callback: (text: string) => void): () => void;
   getSubmitButton(): HTMLElement | null;
   onSubmitIntercept(callback: (event: Event) => boolean): () => void;
-  getWarningAnchor(): HTMLElement | null;
-  renderWarning(warning: WarningConfig): HTMLElement;
+  getIconAnchor(): HTMLElement | null;
+  getIconPlacement(): IconPlacementConfig;
+  getInputAreaWrapper(): HTMLElement | null;
   renderInlineHighlight(range: TextRange, severity: Severity): void;
   cleanup(): void;
 }

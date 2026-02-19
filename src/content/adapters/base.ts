@@ -1,10 +1,10 @@
 import type {
+  IconPlacementConfig,
   InputType,
   PlatformAdapter,
   PlatformId,
   Severity,
-  TextRange,
-  WarningConfig
+  TextRange
 } from './types';
 
 const DEBOUNCE_MS = 300;
@@ -319,77 +319,20 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     });
   }
 
-  getWarningAnchor(): HTMLElement | null {
+  getIconAnchor(): HTMLElement | null {
     return this.detectInputElement()?.parentElement ?? document.body;
   }
 
-  renderWarning(warning: WarningConfig): HTMLElement {
-    const container = document.createElement('section');
-    container.setAttribute('data-redactr-warning', 'true');
-    container.setAttribute('data-severity', warning.severity);
-    container.setAttribute('data-blocking', String(Boolean(warning.blocking)));
-    container.setAttribute('role', 'region');
-    container.setAttribute('aria-label', 'REDACTR warning');
+  getIconPlacement(): IconPlacementConfig {
+    return {
+      placement: 'inside-right',
+      rightPx: 8,
+      bottomPx: 8
+    };
+  }
 
-    const statusZone = document.createElement('div');
-    statusZone.setAttribute('data-redactr-zone', 'status');
-
-    const statusSummary = document.createElement('div');
-    statusSummary.setAttribute('data-redactr-status-summary', 'true');
-    statusZone.append(statusSummary);
-
-    const dismissButton = document.createElement('button');
-    dismissButton.type = 'button';
-    dismissButton.textContent = '×';
-    dismissButton.setAttribute('data-redactr-action', 'dismiss');
-    dismissButton.setAttribute('aria-label', 'Dismiss warning');
-    statusZone.append(dismissButton);
-
-    const findingsZone = document.createElement('div');
-    findingsZone.setAttribute('data-redactr-zone', 'findings');
-
-    const findings = document.createElement('div');
-    findings.setAttribute('data-redactr-warning-findings', 'true');
-    findingsZone.append(findings);
-
-    const actionsZone = document.createElement('div');
-    actionsZone.setAttribute('data-redactr-zone', 'actions');
-    actionsZone.setAttribute('data-redactr-warning-actions', 'true');
-
-    const actionButtons: Array<{ action: string; label: string; ariaLabel: string }> = [
-      {
-        action: 'mask_send',
-        label: 'Mask & Send',
-        ariaLabel: 'Mask sensitive data and send prompt'
-      },
-      {
-        action: 'edit_prompt',
-        label: 'Edit Prompt',
-        ariaLabel: 'Edit prompt and review highlighted sensitive data'
-      },
-      {
-        action: 'allow_once',
-        label: 'Allow Once',
-        ariaLabel: 'Allow this prompt once without masking'
-      },
-      {
-        action: 'always_allow',
-        label: 'Always Allow',
-        ariaLabel: 'Always allow this exact pattern in future prompts'
-      }
-    ];
-
-    for (const actionButton of actionButtons) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = actionButton.label;
-      button.setAttribute('data-redactr-action', actionButton.action);
-      button.setAttribute('aria-label', actionButton.ariaLabel);
-      actionsZone.append(button);
-    }
-
-    container.append(statusZone, findingsZone, actionsZone);
-    return container;
+  getInputAreaWrapper(): HTMLElement | null {
+    return this.detectInputElement()?.parentElement ?? null;
   }
 
   renderInlineHighlight(range: TextRange, _severity: Severity): void {

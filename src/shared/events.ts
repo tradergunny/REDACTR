@@ -9,22 +9,25 @@ export type PlatformId = 'chatgpt' | 'claude';
 
 export type PIIEventType =
   | 'scan_completed'
-  | 'warning_shown'
-  | 'pii_detected'
-  | 'pii_masked'
-  | 'pii_allowed_once'
-  | 'pii_allowlisted'
-  | 'pii_edit_requested'
-  | 'warning_dismissed'
+  | 'panel_opened'
+  | 'panel_closed'
+  | 'pii_item_redacted'
+  | 'pii_item_ignored'
+  | 'pii_batch_redacted'
   | 'submit_intercepted'
+  | 'submit_confirmed'
+  | 'send_anyway_confirmed'
+  | 'warning_dismissed'
   | 'dashboard_viewed'
-  | 'settings_changed';
+  | 'settings_changed'
+  | 'pattern_allowlisted';
 
 export interface PIIEvent {
   event_id: string;
   timestamp: string;
   event_type: PIIEventType;
   platform: PlatformId;
+  session_id: string;
   category?: PIICategory;
   severity?: Severity;
   confidence?: number;
@@ -35,16 +38,35 @@ export interface PIIEvent {
   mode?: DetectionMode;
   prompt_length?: number;
   action_latency_ms?: number;
-  session_id: string;
   char_count?: number;
   pii_found?: boolean;
   latency_ms?: number;
+  detection_count?: number;
+  highest_severity?: Severity;
+  trigger?: 'icon_click' | 'blocked_submit';
+  close_reason?: 'icon_click' | 'outside_click' | 'escape' | 'close_button';
+  pending_items?: number;
+  duration_ms?: number;
+  redaction_format?: string;
+  item_count?: number;
+  categories?: PIICategory[];
+  severities?: Severity[];
+  pending_count?: number;
+  redacted_count?: number;
+  ignored_count?: number;
+  total_detected?: number;
+  filters_applied?: string[];
+  setting_key?: string;
+  old_value?: string;
+  new_value?: string;
+  is_regex?: boolean;
 }
 
 export interface ScanCompletedEventInput {
   platform: PlatformId;
   promptLength: number;
   piiFound: boolean;
+  detectionCount: number;
   latencyMs: number;
   sessionId: string;
   mode?: DetectionMode;
@@ -54,30 +76,11 @@ export interface ScanCompletedEventInput {
   suppressedReason?: string;
 }
 
-export type PIIActionEventType = Extract<
-  PIIEventType,
-  | 'pii_masked'
-  | 'pii_edit_requested'
-  | 'pii_allowed_once'
-  | 'warning_dismissed'
-  | 'submit_intercepted'
-  | 'pii_allowlisted'
->;
-
-export interface PIIActionEventInput {
-  eventType: PIIActionEventType;
+export interface InterventionEventInput {
+  eventType: Exclude<PIIEventType, 'scan_completed'>;
   platform: PlatformId;
   sessionId: string;
-  promptLength: number;
-  actionLatencyMs?: number;
-  category?: PIICategory;
-  severity?: Severity;
-  confidence?: number;
-  decision?: DetectionDecision;
-  shadowDecision?: DetectionDecision;
-  suppressedReason?: string;
-  mode?: DetectionMode;
-  ruleVersion?: string;
+  payload?: Partial<Omit<PIIEvent, 'event_id' | 'timestamp' | 'event_type' | 'platform' | 'session_id'>>;
 }
 
 export const createScanCompletedEvent = (
@@ -95,6 +98,7 @@ export const createScanCompletedEvent = (
     prompt_length: input.promptLength,
     char_count: input.promptLength,
     pii_found: input.piiFound,
+    detection_count: input.detectionCount,
     latency_ms: roundedLatencyMs
   };
 
@@ -121,54 +125,16 @@ export const createScanCompletedEvent = (
   return event;
 };
 
-export const createPIIActionEvent = (input: PIIActionEventInput): PIIEvent => {
-  const event: PIIEvent = {
-    event_id: crypto.randomUUID(),
-    timestamp: new Date().toISOString(),
-    event_type: input.eventType,
-    platform: input.platform,
-    session_id: input.sessionId,
-    prompt_length: input.promptLength
-  };
-
-  if (typeof input.actionLatencyMs === 'number') {
-    event.action_latency_ms = Number(input.actionLatencyMs.toFixed(2));
-  }
-
-  if (input.category) {
-    event.category = input.category;
-  }
-
-  if (input.severity) {
-    event.severity = input.severity;
-  }
-
-  if (typeof input.confidence === 'number') {
-    event.confidence = input.confidence;
-  }
-
-  if (input.decision) {
-    event.decision = input.decision;
-  }
-
-  if (input.shadowDecision) {
-    event.shadow_decision = input.shadowDecision;
-  }
-
-  if (input.suppressedReason) {
-    event.suppressed_reason = input.suppressedReason;
-  }
-
-  if (input.mode) {
-    event.mode = input.mode;
-  }
-
-  if (input.ruleVersion) {
-    event.rule_version = input.ruleVersion;
-  }
-
-  return event;
-};
+export const createInterventionEvent = (
+  input: InterventionEventInput
+): PIIEvent => ({
+  event_id: crypto.randomUUID(),
+  timestamp: new Date().toISOString(),
+  event_type: input.eventType,
+  platform: input.platform,
+  session_id: input.sessionId,
+  ...(input.payload ?? {})
+});
 
 export const sanitizePIIEvent = (event: PIIEvent): PIIEvent => {
   const sanitized: PIIEvent = {
@@ -178,57 +144,51 @@ export const sanitizePIIEvent = (event: PIIEvent): PIIEvent => {
     platform: event.platform,
     session_id: event.session_id
   };
+  const mutableSanitized = sanitized as unknown as Record<string, unknown>;
 
-  if (event.category) {
-    sanitized.category = event.category;
-  }
+  const copyKeys: Array<keyof PIIEvent> = [
+    'category',
+    'severity',
+    'confidence',
+    'decision',
+    'shadow_decision',
+    'suppressed_reason',
+    'rule_version',
+    'mode',
+    'prompt_length',
+    'action_latency_ms',
+    'char_count',
+    'pii_found',
+    'latency_ms',
+    'detection_count',
+    'highest_severity',
+    'trigger',
+    'close_reason',
+    'pending_items',
+    'duration_ms',
+    'redaction_format',
+    'item_count',
+    'categories',
+    'severities',
+    'pending_count',
+    'redacted_count',
+    'ignored_count',
+    'total_detected',
+    'filters_applied',
+    'setting_key',
+    'old_value',
+    'new_value',
+    'is_regex'
+  ];
 
-  if (event.severity) {
-    sanitized.severity = event.severity;
-  }
+  for (const key of copyKeys) {
+    const value = event[key];
 
-  if (typeof event.confidence === 'number') {
-    sanitized.confidence = event.confidence;
-  }
+    if (typeof value === 'undefined') {
+      continue;
+    }
 
-  if (event.decision) {
-    sanitized.decision = event.decision;
-  }
-
-  if (event.shadow_decision) {
-    sanitized.shadow_decision = event.shadow_decision;
-  }
-
-  if (event.suppressed_reason) {
-    sanitized.suppressed_reason = event.suppressed_reason;
-  }
-
-  if (event.rule_version) {
-    sanitized.rule_version = event.rule_version;
-  }
-
-  if (event.mode) {
-    sanitized.mode = event.mode;
-  }
-
-  if (typeof event.prompt_length === 'number') {
-    sanitized.prompt_length = event.prompt_length;
-  }
-
-  if (typeof event.action_latency_ms === 'number') {
-    sanitized.action_latency_ms = event.action_latency_ms;
-  }
-
-  if (typeof event.char_count === 'number') {
-    sanitized.char_count = event.char_count;
-  }
-
-  if (typeof event.pii_found === 'boolean') {
-    sanitized.pii_found = event.pii_found;
-  }
-
-  if (typeof event.latency_ms === 'number') {
-    sanitized.latency_ms = event.latency_ms;
+    mutableSanitized[key] = Array.isArray(value) ? [...value] : value;
   }
 
   return sanitized;

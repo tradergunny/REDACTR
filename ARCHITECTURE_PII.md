@@ -10,7 +10,7 @@ REDACTR runs fully in the browser as a Manifest V3 extension. All PII detection 
 graph TD
   A[Content Script] --> B[Platform Adapter]
   B --> C[PII Detection Engine]
-  C --> D[Warning UI]
+  C --> D[Intervention Panel UI]
   A --> E[Service Worker]
   E --> F[chrome.storage]
   E --> G[Analytics (Opt-in)]
@@ -21,7 +21,7 @@ graph TD
 - Content Script: DOM observation, text capture, UI injection, submit interception
 - Platform Adapter: Platform selectors, input capture, submit hooks, anchor elements
 - PII Detection Engine: Regex rules, severity scoring, masking suggestions
-- Warning UI: Banner, highlights, action handlers, modal confirmation
+- Intervention Panel UI: Floating icon, popover panel, per-item controls, submit confirmation modal
 - Service Worker: Message routing, settings sync, event aggregation
 - Storage: Settings, allowlist, event log
 

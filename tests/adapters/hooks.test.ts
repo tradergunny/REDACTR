@@ -26,6 +26,20 @@ describe('adapter hooks and lifecycle', () => {
     expect(adapter.captureText()).toBe('hello world');
   });
 
+  it('exposes ChatGPT icon and input anchors', () => {
+    document.body.innerHTML = `
+      <form id="composer">
+        <textarea id="prompt-textarea">hello</textarea>
+        <button data-testid="send-button">Send</button>
+      </form>
+    `;
+    const adapter = new ChatGPTAdapter();
+
+    expect(adapter.getIconAnchor()?.id).toBe('composer');
+    expect(adapter.getInputAreaWrapper()?.id).toBe('composer');
+    expect(adapter.getIconPlacement().placement).toBe('inside-right');
+  });
+
   it('captures ChatGPT ProseMirror contenteditable text', () => {
     document.body.innerHTML = `
       <textarea class="wcDTda_fallbackTextarea" name="prompt-textarea" style="display: none;"></textarea>
@@ -41,6 +55,20 @@ describe('adapter hooks and lifecycle', () => {
     const adapter = new ClaudeAdapter();
 
     expect(adapter.captureText()).toBe('one\ntwo');
+  });
+
+  it('exposes Claude icon and input anchors', () => {
+    document.body.innerHTML = `
+      <form id="composer">
+        <div contenteditable="true" role="textbox">hello</div>
+        <button aria-label="Send">Send</button>
+      </form>
+    `;
+    const adapter = new ClaudeAdapter();
+
+    expect(adapter.getIconAnchor()?.id).toBe('composer');
+    expect(adapter.getInputAreaWrapper()?.id).toBe('composer');
+    expect(adapter.getIconPlacement().placement).toBe('inside-right');
   });
 
   it('fires onTextChanged with debounce on typing', async () => {

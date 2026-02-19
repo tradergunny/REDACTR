@@ -259,7 +259,7 @@ CHANGELOG.md
 > - Reset-to-defaults option with confirmation
 > - Validate on read: handle corrupt storage gracefully → reset to defaults
 > - Allowlist management panel: view, edit, delete individual entries
->- Allowlisting is ONLY available through the Settings panel (not from the detection panel). The detection panel's "Ignore" action is session-only — it does not persist. Users must go to Settings to add permanent allowlist entries.
+>>- Allowlisting is ONLY available through the Settings panel (not from the detection panel). The detection panel's "Ignore" action is session-only — it does not persist. Users must go to Settings to add permanent allowlist entries.
 > - Manual entry of exact match or regex patterns in settings
 > - Import/export allowlist as JSON
 > - Max 100 entries with FIFO eviction

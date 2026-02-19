@@ -5,6 +5,7 @@ import {
   pickByFallback,
   queryFirst
 } from './base';
+import type { IconPlacementConfig } from './types';
 
 const CLAUDE_URLS = [/^https:\/\/claude\.ai\//i];
 
@@ -68,6 +69,20 @@ const pickHeuristicSendButton = (input: HTMLElement | null): HTMLButtonElement |
   return submitLike ?? candidates[0] ?? null;
 };
 
+const getComposerWrapper = (input: HTMLElement | null): HTMLElement | null => {
+  if (!input) {
+    return null;
+  }
+
+  const wrapper =
+    input.closest<HTMLElement>('[data-testid*="composer" i]') ??
+    input.closest<HTMLElement>('[class*="composer" i]') ??
+    input.closest<HTMLElement>('form, section, main, [role="main"]') ??
+    input.parentElement;
+
+  return wrapper ?? null;
+};
+
 export class ClaudeAdapter extends BasePlatformAdapter {
   constructor() {
     super('claude', 'Claude', CLAUDE_URLS);
@@ -101,5 +116,21 @@ export class ClaudeAdapter extends BasePlatformAdapter {
       () => queryFirst<HTMLButtonElement>(CLAUDE_BUTTON_SECONDARY),
       () => pickHeuristicSendButton(this.detectInputElement())
     ]);
+  }
+
+  getIconAnchor(): HTMLElement | null {
+    return getComposerWrapper(this.detectInputElement());
+  }
+
+  getIconPlacement(): IconPlacementConfig {
+    return {
+      placement: 'inside-right',
+      rightPx: 8,
+      bottomPx: 8
+    };
+  }
+
+  getInputAreaWrapper(): HTMLElement | null {
+    return getComposerWrapper(this.detectInputElement());
   }
 }

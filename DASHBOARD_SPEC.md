@@ -13,7 +13,7 @@
 | Protection Summary | Total prompts scanned and PII rate | `scan_completed` events |
 | Severity Breakdown | Bar or donut chart by severity | `pii_detected` grouped by `severity` |
 | Top Categories | Ranked list by category | `pii_detected` grouped by `category` |
-| Outcomes | Pie chart of actions | action events |
+| Outcomes | Pie chart of actions (Redacted / Batch Redacted / Ignored / Send Anyway / Dismissed) | action events |
 | Trend | Line chart of incidents by day | `pii_detected` rollups |
 | History | Table of recent incidents | Last 50-100 events |
 

@@ -116,6 +116,7 @@ const setupAdapter = (enabled: boolean, settings: DetectionSettings): void => {
       platform: adapter.platformId,
       promptLength: text.length,
       piiFound: detections.length > 0,
+      detectionCount: detections.length,
       latencyMs: scanLatencyMs,
       sessionId,
       mode: settings.mode,
@@ -146,6 +147,8 @@ const setupAdapter = (enabled: boolean, settings: DetectionSettings): void => {
   };
 
   const rebindAdapterHooks = (): void => {
+    interventionController.syncUiAnchors();
+
     const nextInput = adapter.detectInputElement();
     const nextSubmit = adapter.getSubmitButton();
 
@@ -178,13 +181,20 @@ const setupAdapter = (enabled: boolean, settings: DetectionSettings): void => {
   };
 
   const observer = new MutationObserver(() => {
-    rebindAdapterHooks();
+    const inputDisconnected = Boolean(boundInput && !boundInput.isConnected);
+    const submitDisconnected = Boolean(boundSubmit && !boundSubmit.isConnected);
+
+    if (inputDisconnected || submitDisconnected || !boundInput || !boundSubmit) {
+      rebindAdapterHooks();
+      return;
+    }
+
+    interventionController.syncUiAnchors();
   });
 
   observer.observe(document.documentElement, {
     childList: true,
-    subtree: true,
-    attributes: true
+    subtree: true
   });
 
   const intervalId = window.setInterval(() => {

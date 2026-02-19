@@ -64,6 +64,27 @@ describe('adapter selector fallback', () => {
     expect(adapter.getSubmitButton()).toBeInstanceOf(HTMLButtonElement);
   });
 
+  it('ChatGPT exposes icon anchor and input wrapper', () => {
+    clearDom();
+    document.body.innerHTML = `
+      <form id="composer">
+        <textarea id="prompt-textarea"></textarea>
+        <button data-testid="send-button">Send</button>
+      </form>
+    `;
+
+    const adapter = new ChatGPTAdapter();
+    const iconAnchor = adapter.getIconAnchor();
+    const inputWrapper = adapter.getInputAreaWrapper();
+    const iconPlacement = adapter.getIconPlacement();
+
+    expect(iconAnchor).toBeInstanceOf(HTMLElement);
+    expect(inputWrapper).toBeInstanceOf(HTMLElement);
+    expect(iconAnchor?.id).toBe('composer');
+    expect(inputWrapper?.id).toBe('composer');
+    expect(iconPlacement.placement).toBe('inside-right');
+  });
+
   it('Claude input uses primary contenteditable selector', () => {
     clearDom();
     document.body.innerHTML = '<div contenteditable="true" role="textbox"></div>';
@@ -98,5 +119,26 @@ describe('adapter selector fallback', () => {
     const adapter = new ClaudeAdapter();
 
     expect(adapter.getSubmitButton()).toBeInstanceOf(HTMLButtonElement);
+  });
+
+  it('Claude exposes icon anchor and input wrapper', () => {
+    clearDom();
+    document.body.innerHTML = `
+      <form id="composer">
+        <div contenteditable="true" role="textbox"></div>
+        <button aria-label="Send">Send</button>
+      </form>
+    `;
+
+    const adapter = new ClaudeAdapter();
+    const iconAnchor = adapter.getIconAnchor();
+    const inputWrapper = adapter.getInputAreaWrapper();
+    const iconPlacement = adapter.getIconPlacement();
+
+    expect(iconAnchor).toBeInstanceOf(HTMLElement);
+    expect(inputWrapper).toBeInstanceOf(HTMLElement);
+    expect(iconAnchor?.id).toBe('composer');
+    expect(inputWrapper?.id).toBe('composer');
+    expect(iconPlacement.placement).toBe('inside-right');
   });
 });
