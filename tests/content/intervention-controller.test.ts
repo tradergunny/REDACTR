@@ -49,28 +49,30 @@ const createWarningSkeleton = (warning: WarningConfig): HTMLElement => {
   section.setAttribute('data-redactr-warning', 'true');
   section.setAttribute('data-severity', warning.severity);
 
-  const header = document.createElement('div');
-  header.setAttribute('data-redactr-warning-header', 'true');
+  const statusZone = document.createElement('div');
+  statusZone.setAttribute('data-redactr-zone', 'status');
 
-  const title = document.createElement('h2');
-  title.setAttribute('data-redactr-warning-title', 'true');
-  header.append(title);
+  const statusSummary = document.createElement('div');
+  statusSummary.setAttribute('data-redactr-status-summary', 'true');
+  statusZone.append(statusSummary);
 
   const dismiss = document.createElement('button');
   dismiss.type = 'button';
   dismiss.textContent = '×';
   dismiss.setAttribute('data-redactr-action', 'dismiss');
   dismiss.setAttribute('aria-label', 'Dismiss warning');
-  header.append(dismiss);
+  statusZone.append(dismiss);
 
-  const message = document.createElement('p');
-  message.setAttribute('data-redactr-warning-message', 'true');
+  const findingsZone = document.createElement('div');
+  findingsZone.setAttribute('data-redactr-zone', 'findings');
 
-  const findings = document.createElement('ul');
+  const findings = document.createElement('div');
   findings.setAttribute('data-redactr-warning-findings', 'true');
+  findingsZone.append(findings);
 
-  const actions = document.createElement('div');
-  actions.setAttribute('data-redactr-warning-actions', 'true');
+  const actionsZone = document.createElement('div');
+  actionsZone.setAttribute('data-redactr-zone', 'actions');
+  actionsZone.setAttribute('data-redactr-warning-actions', 'true');
 
   const actionKeys = ['mask_send', 'edit_prompt', 'allow_once', 'always_allow'];
   for (const actionKey of actionKeys) {
@@ -79,10 +81,10 @@ const createWarningSkeleton = (warning: WarningConfig): HTMLElement => {
     button.setAttribute('data-redactr-action', actionKey);
     button.setAttribute('aria-label', actionKey);
     button.textContent = actionKey;
-    actions.append(button);
+    actionsZone.append(button);
   }
 
-  section.append(header, message, findings, actions);
+  section.append(statusZone, findingsZone, actionsZone);
   return section;
 };
 
@@ -331,7 +333,7 @@ describe('InterventionController', () => {
     expect(controller.onSubmitAttempt(new Event('click'))).toBe(true);
   });
 
-  it('dismiss hides banner but does not unblock critical submit', async () => {
+  it('keeps dismiss disabled for critical findings and still blocks submit', async () => {
     const { controller, events } = setupController();
 
     controller.onScanResult('ssn test 123-45-6789', [criticalDetection]);
@@ -345,12 +347,13 @@ describe('InterventionController', () => {
       throw new Error('dismiss button missing');
     }
 
+    expect(dismissButton.disabled).toBe(true);
     dismissButton.click();
     await flushAsync();
 
     expect(controller.onSubmitAttempt(new Event('click'))).toBe(false);
     const nextHost = document.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
     expect(nextHost).toBeTruthy();
-    expect(events.some((event) => event.event_type === 'warning_dismissed')).toBe(true);
+    expect(events.some((event) => event.event_type === 'warning_dismissed')).toBe(false);
   });
 });

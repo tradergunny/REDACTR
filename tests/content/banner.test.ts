@@ -12,28 +12,30 @@ const buildWarningSkeleton = (warning: WarningConfig): HTMLElement => {
   container.setAttribute('data-redactr-warning', 'true');
   container.setAttribute('data-severity', warning.severity);
 
-  const header = document.createElement('div');
-  header.setAttribute('data-redactr-warning-header', 'true');
+  const statusZone = document.createElement('div');
+  statusZone.setAttribute('data-redactr-zone', 'status');
 
-  const title = document.createElement('h2');
-  title.setAttribute('data-redactr-warning-title', 'true');
-  header.append(title);
+  const statusSummary = document.createElement('div');
+  statusSummary.setAttribute('data-redactr-status-summary', 'true');
+  statusZone.append(statusSummary);
 
   const dismiss = document.createElement('button');
   dismiss.type = 'button';
   dismiss.setAttribute('data-redactr-action', 'dismiss');
   dismiss.setAttribute('aria-label', 'Dismiss warning');
   dismiss.textContent = '×';
-  header.append(dismiss);
+  statusZone.append(dismiss);
 
-  const message = document.createElement('p');
-  message.setAttribute('data-redactr-warning-message', 'true');
+  const findingsZone = document.createElement('div');
+  findingsZone.setAttribute('data-redactr-zone', 'findings');
 
-  const findings = document.createElement('ul');
+  const findings = document.createElement('div');
   findings.setAttribute('data-redactr-warning-findings', 'true');
+  findingsZone.append(findings);
 
-  const actions = document.createElement('div');
-  actions.setAttribute('data-redactr-warning-actions', 'true');
+  const actionsZone = document.createElement('div');
+  actionsZone.setAttribute('data-redactr-zone', 'actions');
+  actionsZone.setAttribute('data-redactr-warning-actions', 'true');
 
   const buttonSpecs: Array<{ action: string; label: string; ariaLabel: string }> = [
     {
@@ -48,7 +50,7 @@ const buildWarningSkeleton = (warning: WarningConfig): HTMLElement => {
     },
     {
       action: 'allow_once',
-      label: 'Allow This Time',
+      label: 'Allow Once',
       ariaLabel: 'Allow this prompt once without masking'
     },
     {
@@ -64,10 +66,10 @@ const buildWarningSkeleton = (warning: WarningConfig): HTMLElement => {
     button.textContent = buttonSpec.label;
     button.setAttribute('data-redactr-action', buttonSpec.action);
     button.setAttribute('aria-label', buttonSpec.ariaLabel);
-    actions.append(button);
+    actionsZone.append(button);
   }
 
-  container.append(header, message, findings, actions);
+  container.append(statusZone, findingsZone, actionsZone);
   return container;
 };
 
@@ -128,13 +130,15 @@ describe('WarningBanner', () => {
 
     const host = anchor.querySelector<HTMLElement>('[data-redactr-warning-host="true"]');
     const shadow = host?.shadowRoot;
-    const findings = shadow?.querySelectorAll('[data-redactr-finding="true"]');
+    const zones = shadow?.querySelectorAll('[data-redactr-zone]');
+    const findings = shadow?.querySelectorAll('[data-redactr-finding-row="true"]');
 
     expect(host).toBeTruthy();
+    expect(zones?.length).toBe(3);
     expect(findings?.length).toBe(2);
   });
 
-  it('maps severity to expected color variable', () => {
+  it('renders status summary and disables dismiss for high severity', () => {
     const anchor = document.querySelector<HTMLElement>('#anchor');
     if (!anchor) {
       throw new Error('anchor element missing');
@@ -143,11 +147,17 @@ describe('WarningBanner', () => {
     const banner = new WarningBanner(createAdapter(), vi.fn());
     banner.show(anchor, buildWarningModel('high'));
 
-    const warning = anchor
+    const host = anchor
       .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
-      ?.shadowRoot?.querySelector<HTMLElement>('[data-redactr-warning="true"]');
+      ?.shadowRoot;
+    const summary = host?.querySelector<HTMLElement>('[data-redactr-status-summary="true"]');
+    const dismissButton = host?.querySelector<HTMLButtonElement>(
+      'button[data-redactr-action="dismiss"]'
+    );
 
-    expect(warning?.style.getPropertyValue('--rd-accent')).toBe('#EA580C');
+    expect(summary?.textContent).toContain('2 sensitive items');
+    expect(summary?.textContent).toContain('High');
+    expect(dismissButton?.disabled).toBe(true);
   });
 
   it('sets aria labels on all interactive controls', () => {
@@ -170,6 +180,49 @@ describe('WarningBanner', () => {
     });
   });
 
+  it('renders 4 rows + overflow expander for 5 findings and expands on click', () => {
+    const anchor = document.querySelector<HTMLElement>('#anchor');
+    if (!anchor) {
+      throw new Error('anchor element missing');
+    }
+
+    const findings: WarningViewModel['findings'] = Array.from({ length: 5 }, (_, index) => ({
+      key: `email:john${index}@example.com:${index}:email.rule`,
+      category: 'email' as const,
+      severity: index === 4 ? 'high' : 'medium',
+      maskedPreview: `j***${index}@example.com`,
+      confidence: 0.9
+    }));
+
+    const banner = new WarningBanner(createAdapter(), vi.fn());
+    banner.show(anchor, {
+      severity: 'high',
+      blocking: true,
+      title: 'Sensitive data detected',
+      message: '5 findings detected',
+      findings
+    });
+
+    const shadow = anchor
+      .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
+      ?.shadowRoot;
+
+    const initialRows = shadow?.querySelectorAll('[data-redactr-finding-row="true"]');
+    const expandButton = shadow?.querySelector<HTMLButtonElement>(
+      'button[data-redactr-expand-findings="true"]'
+    );
+
+    expect(initialRows?.length).toBe(4);
+    expect(expandButton?.textContent).toBe('+ 1 more');
+
+    expandButton?.click();
+
+    const expandedRows = shadow?.querySelectorAll('[data-redactr-finding-row="true"]');
+    const afterExpandButton = shadow?.querySelector('button[data-redactr-expand-findings="true"]');
+    expect(expandedRows?.length).toBe(5);
+    expect(afterExpandButton).toBeNull();
+  });
+
   it('handles Enter for focused action and Escape to dismiss', () => {
     const anchor = document.querySelector<HTMLElement>('#anchor');
     if (!anchor) {
@@ -178,7 +231,7 @@ describe('WarningBanner', () => {
 
     const onAction = vi.fn();
     const banner = new WarningBanner(createAdapter(), onAction);
-    banner.show(anchor, buildWarningModel());
+    banner.show(anchor, buildWarningModel('medium'));
 
     const warning = anchor
       .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
@@ -198,6 +251,24 @@ describe('WarningBanner', () => {
 
     expect(onAction).toHaveBeenCalledWith('mask_send');
     expect(onAction).toHaveBeenCalledWith('dismiss');
+  });
+
+  it('ignores Escape dismiss when severity is high', () => {
+    const anchor = document.querySelector<HTMLElement>('#anchor');
+    if (!anchor) {
+      throw new Error('anchor element missing');
+    }
+
+    const onAction = vi.fn();
+    const banner = new WarningBanner(createAdapter(), onAction);
+    banner.show(anchor, buildWarningModel('high'));
+
+    const warning = anchor
+      .querySelector<HTMLElement>('[data-redactr-warning-host="true"]')
+      ?.shadowRoot?.querySelector<HTMLElement>('[data-redactr-warning="true"]');
+
+    warning?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(onAction).not.toHaveBeenCalledWith('dismiss');
   });
 
   it('attaches content into Shadow DOM for style isolation', () => {

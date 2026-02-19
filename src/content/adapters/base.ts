@@ -331,32 +331,30 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     container.setAttribute('role', 'region');
     container.setAttribute('aria-label', 'REDACTR warning');
 
-    const header = document.createElement('div');
-    header.setAttribute('data-redactr-warning-header', 'true');
+    const statusZone = document.createElement('div');
+    statusZone.setAttribute('data-redactr-zone', 'status');
 
-    const title = document.createElement('h2');
-    title.setAttribute('data-redactr-warning-title', 'true');
-    title.textContent = warning.title ?? 'Sensitive data detected';
-    header.append(title);
+    const statusSummary = document.createElement('div');
+    statusSummary.setAttribute('data-redactr-status-summary', 'true');
+    statusZone.append(statusSummary);
 
     const dismissButton = document.createElement('button');
     dismissButton.type = 'button';
     dismissButton.textContent = '×';
     dismissButton.setAttribute('data-redactr-action', 'dismiss');
     dismissButton.setAttribute('aria-label', 'Dismiss warning');
-    header.append(dismissButton);
+    statusZone.append(dismissButton);
 
-    const message = document.createElement('p');
-    message.setAttribute('data-redactr-warning-message', 'true');
-    message.textContent =
-      warning.message ??
-      'Review sensitive data before sending this prompt.';
+    const findingsZone = document.createElement('div');
+    findingsZone.setAttribute('data-redactr-zone', 'findings');
 
-    const findings = document.createElement('ul');
+    const findings = document.createElement('div');
     findings.setAttribute('data-redactr-warning-findings', 'true');
+    findingsZone.append(findings);
 
-    const actions = document.createElement('div');
-    actions.setAttribute('data-redactr-warning-actions', 'true');
+    const actionsZone = document.createElement('div');
+    actionsZone.setAttribute('data-redactr-zone', 'actions');
+    actionsZone.setAttribute('data-redactr-warning-actions', 'true');
 
     const actionButtons: Array<{ action: string; label: string; ariaLabel: string }> = [
       {
@@ -371,7 +369,7 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
       },
       {
         action: 'allow_once',
-        label: 'Allow This Time',
+        label: 'Allow Once',
         ariaLabel: 'Allow this prompt once without masking'
       },
       {
@@ -387,10 +385,10 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
       button.textContent = actionButton.label;
       button.setAttribute('data-redactr-action', actionButton.action);
       button.setAttribute('aria-label', actionButton.ariaLabel);
-      actions.append(button);
+      actionsZone.append(button);
     }
 
-    container.append(header, message, findings, actions);
+    container.append(statusZone, findingsZone, actionsZone);
     return container;
   }
 

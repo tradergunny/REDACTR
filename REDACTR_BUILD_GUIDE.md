@@ -123,7 +123,7 @@ CHANGELOG.md
 ## Phase 4: Intervention UX & Submit Control
 
 ### Goal
-Shadow DOM warning banners, severity color-coding, all 5 user actions, submit blocking for Critical/High.
+Floating toggle icon + popover panel with per-item redaction controls, severity summary, submit blocking for Critical/High. Replaces the old inline banner model with a non-intrusive widget pattern.
 
 ### Tag These Files
 ```
@@ -137,35 +137,99 @@ CHANGELOG.md
 ### Prompt
 > Implement Phase 4: Intervention UX & Submit Control.
 > 
-> Build the warning/action UI layer:
-> - Shadow DOM container injected via adapter's getWarningAnchor()
-> - Warning banner with severity color-coding (Critical=red #DC2626, High=orange #EA580C, Medium=yellow #CA8A04, Low=blue #2563EB)
-> - Multiple detections grouped in a single banner (anti-fatigue)
-> - Masked preview of detected PII in the banner
-> - 5 action buttons: Mask & Send, Edit Prompt, Allow This Time, Always Allow, Dismiss (×)
-> - Submit blocking: Critical/High blocks submit until user picks an action
-> - Mask & Send: replace PII spans (reverse index order for overlaps) → update input → auto-submit
-> - Edit Prompt: focus input, highlight PII spans inline
-> - Allow This Time: submit as-is, suppress for session
-> - Always Allow: add to allowlist (wire to storage, full implementation in Phase 5)
-> - Keyboard accessibility: Tab through actions, Enter to select, Escape to dismiss
-> - ARIA labels on all interactive elements
-> - Emit events per EVENT_SCHEMA.md (pii_masked, pii_edit_requested, pii_allowed_once, warning_dismissed, submit_intercepted)
+> **IMPORTANT: This phase uses a REDESIGNED UI model.** The old inline warning banner is replaced with a floating icon + popover panel. Read this entire prompt before coding.
+> 
+> **A) REDACTR Toggle Icon**
+> - Inject a small shield icon (🛡 or SVG) OUTSIDE and to the RIGHT of the platform's input area
+> - Find the input area's parent container via the adapter and append the icon as a sibling element — do NOT inject inside the textarea/contenteditable
+> - Icon wrapped in Shadow DOM for style isolation
+> - Icon states:
+>   - **Idle (no PII):** Muted/subtle shield, low opacity (~0.4), no badge
+>   - **PII detected:** Icon gets severity-colored glow/pulse + numeric badge showing detection count
+>   - **Critical/High detected:** More aggressive pulse animation; submit is blocked
+> - Icon click toggles the popover panel open/closed
+> - Icon is always visible when extension is enabled on supported pages
+> 
+> **B) Popover Detection Panel**
+> - Anchored to the icon, floating above/to-the-left (so it doesn't clip viewport right edge)
+> - Dark theme: background #1A1A1E, border rgba(255,255,255,0.08)
+> - Top colored glow line matching highest severity color
+> - Panel sections (top to bottom):
+>   1. **Header:** REDACTR branding + detection count + collapse (▾) + close (✕) buttons
+>   2. **Severity summary pills:** Horizontal row of colored pill badges showing count per severity level (Critical=red #FF3B5C, High=orange #FF9F0A, Medium=yellow #FFD60A, Low=blue #6CB4EE). Only show pills for severities that have detections.
+>   3. **Detection cards:** Scrollable list (max-height 360px), one card per detection. Each card contains:
+>      - Category icon + label + severity badge + confidence percentage
+>      - Raw detected value in monospace code block (background rgba(0,0,0,0.3))
+>      - Redaction format selector: dropdown showing available mask formats for that category (e.g., for email: "[Email]", "a***@domain.com", "[REDACTED]"). Default to first option.
+>      - Two action buttons per card: **"Redact"** (green, primary) and **"Ignore"** (muted, secondary)
+>      - After action: card collapses to a resolved state showing "✓ Category → [mask]" (for redact) or "✕ Category — ignored" (strikethrough) with an "Undo" button
+>   4. **Footer actions:** Sticky at bottom. Two buttons:
+>      - **"Redact All (N)"** — primary green CTA, applies default redaction to all pending items
+>      - **"Send Anyway"** — muted secondary button. For Critical/High: triggers a confirmation modal overlay ("Send with sensitive data? Your prompt contains critical-severity PII...") with "Go Back" (primary) and "Send Anyway" (destructive). For Medium/Low only: submits immediately.
+>   5. **Trust line:** Small text at very bottom: "local-first · no data leaves your browser"
+> - When all items are resolved: footer changes to **"Send Redacted"** (green, if any redactions applied) or **"Send Original"** (if all ignored), plus a "Reset" button
+> - Panel dismisses on: close button click, clicking outside the panel, or Escape key
+> 
+> **C) Submit Interception Logic**
+> - When PII detected at Critical or High severity: block the platform's submit button and Enter-key submission
+> - Submit is blocked UNTIL the user opens the panel and resolves all Critical/High items (redact or ignore) — they must make an explicit choice
+> - Medium/Low detections do NOT block submit — badge shows but user can submit freely
+> - When submit is blocked: the platform's send button should appear visually disabled/dimmed. Clicking it should open the REDACTR panel automatically.
+> - After user resolves items and clicks "Send Redacted" or "Send Original": apply any redactions to the input field text (process in reverse index order to preserve positions), then trigger the platform's native submit
+> 
+> **D) Adapter Changes**
+> - Update the PlatformAdapter interface:
+>   - RENAME `getWarningAnchor()` → `getIconAnchor(): HTMLElement | null` — returns the input area's parent/wrapper where the icon should be appended as a sibling
+>   - ADD `getInputAreaWrapper(): HTMLElement | null` — returns the container to position the popover relative to
+>   - KEEP `renderWarning` but repurpose or remove — the panel now handles its own rendering
+> - Update ChatGPT and Claude adapters with new anchor selectors
+> 
+> **E) Styling & Accessibility**
+> - All UI in Shadow DOM — zero style bleed to/from platform
+> - Dark theme throughout (matches v0 reference aesthetic)
+> - Severity colors: Critical=#FF3B5C, High=#FF9F0A, Medium=#FFD60A, Low=#6CB4EE, Success=#34C759
+> - Typography: system sans-serif for labels, monospace for values/code
+> - Keyboard accessibility: Tab through all interactive elements, Enter to activate, Escape to close panel
+> - ARIA labels on icon (role="button", aria-label="REDACTR: N items detected"), panel (role="dialog"), all buttons
+> - Focus trap inside panel when open; return focus to icon on close
+> - Respect `prefers-reduced-motion` (disable pulse animations)
+> - Color contrast WCAG AA (4.5:1 minimum)
+> 
+> **F) Events (per EVENT_SCHEMA.md)**
+> Emit these events:
+> - `scan_completed` — on each debounced scan (existing from Phase 3)
+> - `panel_opened` — when user clicks icon to open panel
+> - `panel_closed` — when panel is dismissed (with reason: icon_click | outside_click | escape | close_button)
+> - `pii_item_redacted` — per individual item redacted (with: category, severity, redaction_format)
+> - `pii_item_ignored` — per individual item ignored (with: category, severity)
+> - `pii_batch_redacted` — when "Redact All" clicked (with: item_count, categories[])
+> - `submit_intercepted` — when blocked submit is attempted (with: severity, pending_count)
+> - `submit_confirmed` — when user completes the flow and sends (with: redacted_count, ignored_count, total_detected)
+> - `send_anyway_confirmed` — when user bypasses via "Send Anyway" confirmation (with: severity, item_count)
+> - `warning_dismissed` — when panel is closed without taking action on pending items
 > 
 > Update CHANGELOG.md.
 
 ### Exit Criteria
-- [ ] Banner appears within 500ms of detection
-- [ ] Color-coding matches severity correctly
-- [ ] Multiple findings aggregated in one banner
-- [ ] Submit blocked for Critical/High — cannot submit until action taken
-- [ ] Medium/Low warnings are non-blocking
-- [ ] "Mask & Send" replaces PII correctly and triggers submit
-- [ ] Keyboard navigation works (Tab, Enter, Escape)
-- [ ] ARIA labels present on all interactive elements
-- [ ] Shadow DOM isolates styles from platform CSS
+- [ ] Shield icon appears outside the input field on both ChatGPT and Claude
+- [ ] Icon shows muted state when no PII, severity-colored pulse + badge when PII detected
+- [ ] Clicking icon toggles popover panel
+- [ ] Panel shows severity summary pills with correct counts and colors
+- [ ] Each detection renders as a card with category, raw value, redaction selector, Redact/Ignore buttons
+- [ ] "Redact" resolves card to green confirmed state; "Ignore" shows strikethrough; both have Undo
+- [ ] Redaction format dropdown shows category-appropriate options
+- [ ] "Redact All" applies default redaction to all pending items
+- [ ] Submit blocked for Critical/High — platform send button dimmed, clicking it opens panel
+- [ ] Medium/Low do NOT block submit
+- [ ] "Send Anyway" for Critical/High triggers confirmation modal; for Medium/Low submits directly
+- [ ] "Send Redacted" applies all redactions to input text (reverse index order) then submits
+- [ ] Panel dismisses on close, outside click, Escape
+- [ ] Keyboard navigation works (Tab, Enter, Escape) with focus trap in panel
+- [ ] ARIA labels present on icon, panel, all buttons
+- [ ] Shadow DOM isolates all styles from platform CSS
 - [ ] No false blocks on clean (non-PII) prompts
-- [ ] All action events emitted correctly
+- [ ] All events emitted correctly per updated EVENT_SCHEMA.md
+- [ ] Icon injection resilient — survives platform DOM rerenders
 
 ---
 
@@ -195,7 +259,7 @@ CHANGELOG.md
 > - Reset-to-defaults option with confirmation
 > - Validate on read: handle corrupt storage gracefully → reset to defaults
 > - Allowlist management panel: view, edit, delete individual entries
-> - "Always Allow" from warning banner → adds exact match to allowlist
+>- Allowlisting is ONLY available through the Settings panel (not from the detection panel). The detection panel's "Ignore" action is session-only — it does not persist. Users must go to Settings to add permanent allowlist entries.
 > - Manual entry of exact match or regex patterns in settings
 > - Import/export allowlist as JSON
 > - Max 100 entries with FIFO eviction
