@@ -26,6 +26,14 @@ describe('adapter hooks and lifecycle', () => {
     expect(adapter.captureText()).toBe('hello world');
   });
 
+  it('captures ChatGPT textarea text without whitespace normalization', () => {
+    const raw = '  first line\n\n\nsecond line  ';
+    document.body.innerHTML = `<textarea id="prompt-textarea">${raw}</textarea>`;
+    const adapter = new ChatGPTAdapter();
+
+    expect(adapter.captureText()).toBe(raw);
+  });
+
   it('updates ChatGPT textarea text via setText', () => {
     document.body.innerHTML = '<textarea id="prompt-textarea">hello world</textarea>';
     const textarea = document.querySelector<HTMLTextAreaElement>('#prompt-textarea');
@@ -65,7 +73,17 @@ describe('adapter hooks and lifecycle', () => {
     `;
     const adapter = new ChatGPTAdapter();
 
-    expect(adapter.captureText()).toBe('123');
+    expect(adapter.captureText()).toBe('123\n');
+  });
+
+  it('captures ChatGPT contenteditable text with original spacing and line breaks', () => {
+    document.body.innerHTML = `
+      <textarea class="wcDTda_fallbackTextarea" name="prompt-textarea" style="display: none;"></textarea>
+      <div contenteditable="true" class="ProseMirror" id="prompt-textarea">  alpha<br><br><br>beta  </div>
+    `;
+    const adapter = new ChatGPTAdapter();
+
+    expect(adapter.captureText()).toBe('  alpha\n\n\nbeta  ');
   });
 
   it('updates ChatGPT contenteditable text via setText', () => {
@@ -89,11 +107,115 @@ describe('adapter hooks and lifecycle', () => {
     expect(inputSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('applies targeted replacements in ChatGPT contenteditable without rebuilding paragraphs', () => {
+    const id = '1-2345-67890-12-3';
+    document.body.innerHTML = `
+      <textarea class="wcDTda_fallbackTextarea" name="prompt-textarea" style="display: none;"></textarea>
+      <div contenteditable="true" class="ProseMirror" id="prompt-textarea"><p>ID ${id}</p><p>Next paragraph</p></div>
+    `;
+    const editable = document.querySelector<HTMLElement>('div[contenteditable="true"]');
+    const adapter = new ChatGPTAdapter();
+
+    if (!editable) {
+      throw new Error('contenteditable missing in test');
+    }
+
+    const before = adapter.captureText();
+    const beforePCount = editable.querySelectorAll('p').length;
+    const beforeDivCount = editable.querySelectorAll('div').length;
+    const beforeBrCount = editable.querySelectorAll('br').length;
+    const startIndex = before.indexOf(id);
+    const endIndex = startIndex + id.length;
+    const inputSpy = vi.fn();
+    editable.addEventListener('input', inputSpy);
+
+    const replaced = adapter.applyTextReplacements(before, [
+      {
+        startIndex,
+        endIndex,
+        expectedText: id,
+        replacementText: '[NATIONAL_ID]'
+      }
+    ]);
+
+    expect(replaced).toBe(true);
+    expect(adapter.captureText()).toBe(before.replace(id, '[NATIONAL_ID]'));
+    expect(editable.querySelectorAll('p')).toHaveLength(beforePCount);
+    expect(editable.querySelectorAll('div')).toHaveLength(beforeDivCount);
+    expect(editable.querySelectorAll('br')).toHaveLength(beforeBrCount);
+    expect(inputSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies far-apart replacements without collapsing ChatGPT paragraph structure', () => {
+    const idA = '1-2345-67890-12-3';
+    const idB = '9-8765-43210-98-7';
+    document.body.innerHTML = `
+      <textarea class="wcDTda_fallbackTextarea" name="prompt-textarea" style="display: none;"></textarea>
+      <div contenteditable="true" class="ProseMirror" id="prompt-textarea">
+        <p>Header</p>
+        <p>ID-A ${idA}</p>
+        <p><br></p>
+        <p>Middle paragraph</p>
+        <p>ID-B ${idB}</p>
+        <p>Footer</p>
+      </div>
+    `;
+    const editable = document.querySelector<HTMLElement>('div[contenteditable="true"]');
+    const adapter = new ChatGPTAdapter();
+
+    if (!editable) {
+      throw new Error('contenteditable missing in test');
+    }
+
+    const before = adapter.captureText();
+    const beforePCount = editable.querySelectorAll('p').length;
+    const beforeBrCount = editable.querySelectorAll('br').length;
+    const startA = before.indexOf(idA);
+    const startB = before.indexOf(idB);
+
+    if (startA < 0 || startB < 0) {
+      throw new Error('sensitive text missing in capture');
+    }
+
+    const replaced = adapter.applyTextReplacements(before, [
+      {
+        startIndex: startA,
+        endIndex: startA + idA.length,
+        expectedText: idA,
+        replacementText: '[NATIONAL_ID]'
+      },
+      {
+        startIndex: startB,
+        endIndex: startB + idB.length,
+        expectedText: idB,
+        replacementText: '[NATIONAL_ID]'
+      }
+    ]);
+
+    expect(replaced).toBe(true);
+    expect(adapter.captureText()).toBe(before.replace(idA, '[NATIONAL_ID]').replace(idB, '[NATIONAL_ID]'));
+    expect(editable.querySelectorAll('p')).toHaveLength(beforePCount);
+    expect(editable.querySelectorAll('br')).toHaveLength(beforeBrCount);
+  });
+
   it('captures Claude contenteditable text from innerHTML', () => {
     document.body.innerHTML = '<div contenteditable="true">one<br>two</div>';
     const adapter = new ClaudeAdapter();
 
     expect(adapter.captureText()).toBe('one\ntwo');
+  });
+
+  it('captures Claude contenteditable text without trimming or paragraph collapse', () => {
+    document.body.innerHTML = `
+      <div contenteditable="true"><div>first</div><div> second</div><div><br></div><div>third  </div></div>
+    `;
+    const adapter = new ClaudeAdapter();
+    const captured = adapter.captureText();
+
+    expect(captured).toContain('first');
+    expect(captured).toContain('\n\n');
+    expect(captured).toContain(' second');
+    expect(captured.endsWith('third  \n')).toBe(true);
   });
 
   it('updates Claude contenteditable text via setText', () => {
@@ -112,6 +234,35 @@ describe('adapter hooks and lifecycle', () => {
 
     expect(editable.textContent).toBe('masked');
     expect(inputSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not mutate Claude contenteditable when replacement range is stale', () => {
+    const id = '1-2345-67890-12-3';
+    document.body.innerHTML = `<div contenteditable="true"><div>ID ${id}</div><div>Second line</div></div>`;
+    const adapter = new ClaudeAdapter();
+    const beforeText = adapter.captureText();
+    const editable = document.querySelector<HTMLElement>('div[contenteditable="true"]');
+
+    if (!editable) {
+      throw new Error('contenteditable missing in test');
+    }
+
+    const beforeHtml = editable.innerHTML;
+    const startIndex = beforeText.indexOf(id);
+    const endIndex = startIndex + id.length;
+
+    const replaced = adapter.applyTextReplacements(beforeText, [
+      {
+        startIndex,
+        endIndex,
+        expectedText: '9-9999-99999-99-9',
+        replacementText: '[NATIONAL_ID]'
+      }
+    ]);
+
+    expect(replaced).toBe(false);
+    expect(editable.innerHTML).toBe(beforeHtml);
+    expect(adapter.captureText()).toBe(beforeText);
   });
 
   it('exposes Claude icon and input anchors', () => {

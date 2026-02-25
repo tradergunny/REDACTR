@@ -25,6 +25,17 @@
 - Add integration tests for new adapters
 - Run regression checks for selector changes
 
+## Progress Logging Protocol
+
+- After each completed implementation task (code + validation), update `CHANGELOG.md` in `## [Unreleased]`.
+- Prefix entries with an area tag (for example: `Adapters`, `Intervention`, `Tests`, `Process`).
+- Keep entries concise and include:
+  - files touched
+  - behavior change
+  - validation command/status when relevant
+- If work is still in progress, report it in chat only until complete.
+- If a later task revises/reverts behavior, add a follow-up changelog entry (do not silently rewrite prior history).
+
 ## PR Checklist
 
 - No new permissions without justification

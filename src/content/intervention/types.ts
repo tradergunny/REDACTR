@@ -30,6 +30,11 @@ export interface InterventionItem {
   status: InterventionStatus;
   selectedFormatId: string;
   selectedMask: string;
+  liveRange?: {
+    startIndex: number;
+    endIndex: number;
+  };
+  liveExpectedText?: string;
   formats: RedactionFormat[];
 }
 
@@ -55,6 +60,11 @@ export interface PersistedItemState {
   status: InterventionStatus;
   selectedFormatId: string;
   selectedMask: string;
+  liveRange?: {
+    startIndex: number;
+    endIndex: number;
+  };
+  liveExpectedText?: string;
 }
 
 export const SEVERITY_PRIORITY: Record<Severity, number> = {

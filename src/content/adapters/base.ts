@@ -4,18 +4,28 @@ import type {
   PlatformAdapter,
   PlatformId,
   Severity,
-  TextRange
+  TextRange,
+  TextReplacement
 } from './types';
 
 const DEBOUNCE_MS = 300;
 
 export type SelectorResolver<T extends HTMLElement> = () => T | null;
 
-const normalizeNewlines = (text: string): string =>
-  text.replace(/\r\n/g, '\n').replace(/\u00a0/g, ' ');
+export const normalizeCapturedText = (text: string): string => text;
 
-export const normalizeCapturedText = (text: string): string =>
-  normalizeNewlines(text).replace(/\n{3,}/g, '\n\n').trim();
+interface TextNodeSegment {
+  node: Text;
+  startIndex: number;
+  endIndex: number;
+}
+
+interface ContentEditableExtraction {
+  text: string;
+  segments: TextNodeSegment[];
+}
+
+const BLOCK_BREAK_TAGS = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
 
 export const queryFirst = <T extends HTMLElement>(
   selectors: string[],
@@ -89,6 +99,183 @@ const getTextNodes = (root: Node): Text[] => {
   }
 
   return textNodes;
+};
+
+const extractContentEditable = (root: HTMLElement): ContentEditableExtraction => {
+  const segments: TextNodeSegment[] = [];
+  let text = '';
+
+  const appendTextNode = (node: Text): void => {
+    const value = node.textContent ?? '';
+    if (!value.length) {
+      return;
+    }
+
+    const startIndex = text.length;
+    text += value;
+    segments.push({
+      node,
+      startIndex,
+      endIndex: text.length
+    });
+  };
+
+  const appendNewline = (): void => {
+    text += '\n';
+  };
+
+  const walk = (node: Node): void => {
+    if (node instanceof Text) {
+      appendTextNode(node);
+      return;
+    }
+
+    if (!(node instanceof HTMLElement)) {
+      for (const child of [...node.childNodes]) {
+        walk(child);
+      }
+      return;
+    }
+
+    if (node.tagName === 'BR') {
+      appendNewline();
+      return;
+    }
+
+    for (const child of [...node.childNodes]) {
+      walk(child);
+    }
+
+    if (BLOCK_BREAK_TAGS.has(node.tagName)) {
+      appendNewline();
+    }
+  };
+
+  for (const child of [...root.childNodes]) {
+    walk(child);
+  }
+
+  return {
+    text,
+    segments
+  };
+};
+
+export const captureContentEditableText = (element: HTMLElement): string =>
+  normalizeCapturedText(extractContentEditable(element).text);
+
+const applyReplacementsToString = (
+  sourceText: string,
+  replacements: TextReplacement[]
+): string | null => {
+  const ordered = [...replacements].sort((left, right) => right.startIndex - left.startIndex);
+  let result = sourceText;
+
+  for (const replacement of ordered) {
+    if (
+      replacement.startIndex < 0 ||
+      replacement.endIndex <= replacement.startIndex ||
+      replacement.endIndex > result.length
+    ) {
+      return null;
+    }
+
+    if (result.slice(replacement.startIndex, replacement.endIndex) !== replacement.expectedText) {
+      return null;
+    }
+
+    result =
+      result.slice(0, replacement.startIndex) +
+      replacement.replacementText +
+      result.slice(replacement.endIndex);
+  }
+
+  return result;
+};
+
+const resolveTextBoundary = (
+  extraction: ContentEditableExtraction,
+  index: number
+): { node: Text; offset: number } | null => {
+  if (!extraction.segments.length) {
+    return null;
+  }
+
+  for (const segment of extraction.segments) {
+    if (index < segment.startIndex || index > segment.endIndex) {
+      continue;
+    }
+
+    return {
+      node: segment.node,
+      offset: index - segment.startIndex
+    };
+  }
+
+  if (index === extraction.text.length) {
+    const last = extraction.segments[extraction.segments.length - 1];
+    return {
+      node: last.node,
+      offset: last.endIndex - last.startIndex
+    };
+  }
+
+  return null;
+};
+
+const applyReplacementsToContentEditable = (
+  element: HTMLElement,
+  baseText: string,
+  replacements: TextReplacement[]
+): boolean => {
+  if (!replacements.length) {
+    return false;
+  }
+
+  const ordered = [...replacements].sort((left, right) => right.startIndex - left.startIndex);
+
+  let currentExtraction = extractContentEditable(element);
+  if (currentExtraction.text !== baseText) {
+    return false;
+  }
+
+  for (const replacement of ordered) {
+    if (
+      replacement.startIndex < 0 ||
+      replacement.endIndex <= replacement.startIndex ||
+      replacement.endIndex > currentExtraction.text.length
+    ) {
+      return false;
+    }
+
+    if (
+      currentExtraction.text.slice(replacement.startIndex, replacement.endIndex) !==
+      replacement.expectedText
+    ) {
+      return false;
+    }
+
+    const start = resolveTextBoundary(currentExtraction, replacement.startIndex);
+    const end = resolveTextBoundary(currentExtraction, replacement.endIndex);
+
+    if (!start || !end) {
+      return false;
+    }
+
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    range.deleteContents();
+
+    if (replacement.replacementText.length) {
+      range.insertNode(document.createTextNode(replacement.replacementText));
+    }
+
+    currentExtraction = extractContentEditable(element);
+  }
+
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
 };
 
 const selectContentEditableRange = (
@@ -186,6 +373,37 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
   abstract captureText(): string;
 
   abstract setText(nextText: string): void;
+
+  applyTextReplacements(baseText: string, replacements: TextReplacement[]): boolean {
+    if (!replacements.length) {
+      return false;
+    }
+
+    const input = this.detectInputElement();
+    if (!input) {
+      return false;
+    }
+
+    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+      const nextText = applyReplacementsToString(input.value, replacements);
+      if (nextText === null) {
+        return false;
+      }
+
+      if (nextText !== input.value) {
+        input.value = nextText;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      return true;
+    }
+
+    if (input.isContentEditable || input.getAttribute('contenteditable') === 'true') {
+      return applyReplacementsToContentEditable(input, baseText, replacements);
+    }
+
+    return false;
+  }
 
   abstract getSubmitButton(): HTMLElement | null;
 

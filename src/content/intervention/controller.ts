@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '../adapters/types';
+import type { PlatformAdapter, TextReplacement } from '../adapters/types';
 import type { DetectionResult, Severity } from '../pii/types';
 import { createInterventionEvent, type PIIEvent } from '../../shared/events';
 import {
@@ -29,6 +29,78 @@ interface SubmitButtonStyleSnapshot {
   filter: string;
   cursor: string;
 }
+
+interface ResolvedRedactionResult {
+  text: string;
+  replacements: TextReplacement[];
+}
+
+const applyReplacementsToString = (
+  sourceText: string,
+  replacements: TextReplacement[]
+): string | null => {
+  const ordered = [...replacements].sort((left, right) => right.startIndex - left.startIndex);
+  let current = sourceText;
+
+  for (const replacement of ordered) {
+    if (
+      replacement.startIndex < 0 ||
+      replacement.endIndex <= replacement.startIndex ||
+      replacement.endIndex > current.length
+    ) {
+      return null;
+    }
+
+    if (current.slice(replacement.startIndex, replacement.endIndex) !== replacement.expectedText) {
+      return null;
+    }
+
+    current =
+      current.slice(0, replacement.startIndex) +
+      replacement.replacementText +
+      current.slice(replacement.endIndex);
+  }
+
+  return current;
+};
+
+const buildDiffReplacement = (
+  currentText: string,
+  nextText: string
+): TextReplacement[] => {
+  if (currentText === nextText) {
+    return [];
+  }
+
+  let prefixLength = 0;
+  const maxPrefix = Math.min(currentText.length, nextText.length);
+  while (
+    prefixLength < maxPrefix &&
+    currentText[prefixLength] === nextText[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  let currentSuffixStart = currentText.length;
+  let nextSuffixStart = nextText.length;
+  while (
+    currentSuffixStart > prefixLength &&
+    nextSuffixStart > prefixLength &&
+    currentText[currentSuffixStart - 1] === nextText[nextSuffixStart - 1]
+  ) {
+    currentSuffixStart -= 1;
+    nextSuffixStart -= 1;
+  }
+
+  return [
+    {
+      startIndex: prefixLength,
+      endIndex: currentSuffixStart,
+      expectedText: currentText.slice(prefixLength, currentSuffixStart),
+      replacementText: nextText.slice(prefixLength, nextSuffixStart)
+    }
+  ];
+};
 
 const compareDetections = (left: DetectionResult, right: DetectionResult): number => {
   if (left.startIndex !== right.startIndex) {
@@ -115,15 +187,29 @@ export class InterventionController {
           return;
         }
 
+        if (this.isContentEditableInput()) {
+          const applied = this.applyContentEditableRedact(item, format.id, format.mask);
+          if (!applied) {
+            this.render();
+            return;
+          }
+
+          void this.emitEvent('pii_item_redacted', {
+            category: item.detection.category,
+            severity: item.detection.severity,
+            confidence: item.detection.confidence,
+            redaction_format: format.label
+          });
+
+          this.render();
+          return;
+        }
+
         item.status = 'redacted';
         item.selectedFormatId = format.id;
         item.selectedMask = format.mask;
 
-        this.itemStateMap.set(item.id, {
-          status: item.status,
-          selectedFormatId: item.selectedFormatId,
-          selectedMask: item.selectedMask
-        });
+        this.persistItemState(item);
 
         void this.emitEvent('pii_item_redacted', {
           category: item.detection.category,
@@ -142,12 +228,9 @@ export class InterventionController {
         }
 
         item.status = 'ignored';
-
-        this.itemStateMap.set(item.id, {
-          status: item.status,
-          selectedFormatId: item.selectedFormatId,
-          selectedMask: item.selectedMask
-        });
+        item.liveRange = undefined;
+        item.liveExpectedText = undefined;
+        this.persistItemState(item);
 
         void this.emitEvent('pii_item_ignored', {
           category: item.detection.category,
@@ -163,17 +246,52 @@ export class InterventionController {
           return;
         }
 
+        if (this.isContentEditableInput()) {
+          if (item.status === 'ignored') {
+            item.status = 'pending';
+            item.liveRange = undefined;
+            item.liveExpectedText = undefined;
+            this.persistItemState(item);
+            this.render();
+            return;
+          }
+
+          if (item.status === 'redacted') {
+            const undone = this.applyContentEditableUndo(item);
+            if (!undone) {
+              this.render();
+              return;
+            }
+          }
+
+          this.render();
+          return;
+        }
+
         item.status = 'pending';
-        this.itemStateMap.set(item.id, {
-          status: item.status,
-          selectedFormatId: item.selectedFormatId,
-          selectedMask: item.selectedMask
-        });
+        this.persistItemState(item);
 
         this.applyImmediatePreviewFromCurrentState();
         this.render();
       },
       onRedactAll: (itemIds) => {
+        if (this.isContentEditableInput()) {
+          const touched = this.applyContentEditableRedactAll(itemIds);
+          if (!touched.length) {
+            this.render();
+            return;
+          }
+
+          void this.emitEvent('pii_batch_redacted', {
+            item_count: touched.length,
+            categories: touched.map((item) => item.detection.category),
+            severities: touched.map((item) => item.detection.severity)
+          });
+
+          this.render();
+          return;
+        }
+
         const touched: InterventionItem[] = [];
 
         for (const itemId of itemIds) {
@@ -193,11 +311,7 @@ export class InterventionController {
           item.selectedFormatId = selected.id;
           item.selectedMask = selected.mask;
 
-          this.itemStateMap.set(item.id, {
-            status: item.status,
-            selectedFormatId: item.selectedFormatId,
-            selectedMask: item.selectedMask
-          });
+          this.persistItemState(item);
 
           touched.push(item);
         }
@@ -222,13 +336,15 @@ export class InterventionController {
         this.submitFromPanel({ sendAnywayConfirmed: fromConfirmation });
       },
       onReset: () => {
+        if (this.isContentEditableInput()) {
+          this.applyContentEditableReset();
+          this.render();
+          return;
+        }
+
         for (const item of this.activeItems) {
           item.status = 'pending';
-          this.itemStateMap.set(item.id, {
-            status: item.status,
-            selectedFormatId: item.selectedFormatId,
-            selectedMask: item.selectedMask
-          });
+          this.persistItemState(item);
         }
 
         this.applyImmediatePreviewFromCurrentState();
@@ -243,6 +359,327 @@ export class InterventionController {
 
   private getItem(itemId: string): InterventionItem | undefined {
     return this.activeItems.find((item) => item.id === itemId);
+  }
+
+  private isContentEditableInput(): boolean {
+    return this.adapter.getInputType() === 'contenteditable';
+  }
+
+  private persistItemState(item: InterventionItem): void {
+    this.itemStateMap.set(item.id, {
+      status: item.status,
+      selectedFormatId: item.selectedFormatId,
+      selectedMask: item.selectedMask,
+      liveRange: item.liveRange
+        ? {
+            startIndex: item.liveRange.startIndex,
+            endIndex: item.liveRange.endIndex
+          }
+        : undefined,
+      liveExpectedText: item.liveExpectedText
+    });
+  }
+
+  private persistAllItemStates(): void {
+    const next = new Map<string, PersistedItemState>();
+
+    for (const item of this.activeItems) {
+      next.set(item.id, {
+        status: item.status,
+        selectedFormatId: item.selectedFormatId,
+        selectedMask: item.selectedMask,
+        liveRange: item.liveRange
+          ? {
+              startIndex: item.liveRange.startIndex,
+              endIndex: item.liveRange.endIndex
+            }
+          : undefined,
+        liveExpectedText: item.liveExpectedText
+      });
+    }
+
+    this.itemStateMap = next;
+  }
+
+  private shiftItemRangesAfter(pivotIndex: number, delta: number, skippedItemId: string): void {
+    if (delta === 0) {
+      return;
+    }
+
+    for (const item of this.activeItems) {
+      if (item.id === skippedItemId) {
+        continue;
+      }
+
+      if (item.detection.startIndex >= pivotIndex) {
+        item.detection = {
+          ...item.detection,
+          startIndex: item.detection.startIndex + delta,
+          endIndex: item.detection.endIndex + delta
+        };
+      }
+
+      if (item.liveRange && item.liveRange.startIndex >= pivotIndex) {
+        item.liveRange = {
+          startIndex: item.liveRange.startIndex + delta,
+          endIndex: item.liveRange.endIndex + delta
+        };
+      }
+    }
+  }
+
+  private applyContentEditableReplacements(
+    baseText: string,
+    replacements: TextReplacement[]
+  ): { applied: boolean; nextText: string } {
+    const nextText = applyReplacementsToString(baseText, replacements);
+    if (nextText === null) {
+      return {
+        applied: false,
+        nextText: baseText
+      };
+    }
+
+    this.pendingProgrammaticText = nextText;
+    this.latestText = nextText;
+    this.baselineText = nextText;
+
+    const applied = this.adapter.applyTextReplacements(baseText, replacements);
+    if (!applied) {
+      this.pendingProgrammaticText = null;
+      this.latestText = baseText;
+      this.baselineText = baseText;
+      return {
+        applied: false,
+        nextText: baseText
+      };
+    }
+
+    const captured = this.adapter.captureText();
+    if (captured !== nextText) {
+      this.pendingProgrammaticText = null;
+      this.latestText = captured;
+      this.baselineText = captured;
+      return {
+        applied: false,
+        nextText: captured
+      };
+    }
+
+    return {
+      applied: true,
+      nextText
+    };
+  }
+
+  private applyContentEditableRedact(
+    item: InterventionItem,
+    selectedFormatId: string,
+    selectedMask: string
+  ): boolean {
+    const baseText = this.latestText;
+    const startIndex = item.detection.startIndex;
+    const endIndex = item.detection.endIndex;
+    const expectedText = item.detection.text;
+
+    const replacement: TextReplacement = {
+      startIndex,
+      endIndex,
+      expectedText,
+      replacementText: selectedMask
+    };
+
+    const { applied } = this.applyContentEditableReplacements(baseText, [replacement]);
+    if (!applied) {
+      return false;
+    }
+
+    const delta = selectedMask.length - expectedText.length;
+    this.shiftItemRangesAfter(endIndex, delta, item.id);
+
+    item.status = 'redacted';
+    item.selectedFormatId = selectedFormatId;
+    item.selectedMask = selectedMask;
+    item.liveRange = {
+      startIndex,
+      endIndex: startIndex + selectedMask.length
+    };
+    item.liveExpectedText = selectedMask;
+    item.detection = {
+      ...item.detection,
+      startIndex,
+      endIndex: startIndex + selectedMask.length
+    };
+
+    this.persistAllItemStates();
+    return true;
+  }
+
+  private applyContentEditableUndo(item: InterventionItem): boolean {
+    const range = item.liveRange;
+    const expectedText = item.liveExpectedText ?? item.selectedMask;
+
+    if (!range) {
+      return false;
+    }
+
+    const replacement: TextReplacement = {
+      startIndex: range.startIndex,
+      endIndex: range.endIndex,
+      expectedText,
+      replacementText: item.detection.text
+    };
+
+    const baseText = this.latestText;
+    const { applied } = this.applyContentEditableReplacements(baseText, [replacement]);
+    if (!applied) {
+      return false;
+    }
+
+    const delta = item.detection.text.length - expectedText.length;
+    this.shiftItemRangesAfter(range.endIndex, delta, item.id);
+
+    item.status = 'pending';
+    item.liveRange = undefined;
+    item.liveExpectedText = undefined;
+    item.detection = {
+      ...item.detection,
+      startIndex: range.startIndex,
+      endIndex: range.startIndex + item.detection.text.length
+    };
+
+    this.persistAllItemStates();
+    return true;
+  }
+
+  private applyContentEditableRedactAll(itemIds: string[]): InterventionItem[] {
+    const plans = itemIds
+      .map((itemId) => {
+        const item = this.getItem(itemId);
+        if (!item || item.status !== 'pending') {
+          return null;
+        }
+
+        const { defaultFormatId, formats } = buildRedactionFormats(item.detection);
+        const selected = formats.find((entry) => entry.id === defaultFormatId) ?? formats[0];
+        if (!selected) {
+          return null;
+        }
+
+        return {
+          item,
+          selectedFormatId: selected.id,
+          selectedMask: selected.mask,
+          startIndex: item.detection.startIndex,
+          endIndex: item.detection.endIndex
+        };
+      })
+      .filter((entry) => entry !== null)
+      .sort((left, right) => right.startIndex - left.startIndex);
+
+    if (!plans.length) {
+      return [];
+    }
+
+    const replacements: TextReplacement[] = plans.map((plan) => ({
+      startIndex: plan.startIndex,
+      endIndex: plan.endIndex,
+      expectedText: plan.item.detection.text,
+      replacementText: plan.selectedMask
+    }));
+
+    const { applied } = this.applyContentEditableReplacements(this.latestText, replacements);
+    if (!applied) {
+      return [];
+    }
+
+    for (const plan of plans) {
+      const delta = plan.selectedMask.length - plan.item.detection.text.length;
+      this.shiftItemRangesAfter(plan.endIndex, delta, plan.item.id);
+
+      plan.item.status = 'redacted';
+      plan.item.selectedFormatId = plan.selectedFormatId;
+      plan.item.selectedMask = plan.selectedMask;
+      plan.item.liveRange = {
+        startIndex: plan.startIndex,
+        endIndex: plan.startIndex + plan.selectedMask.length
+      };
+      plan.item.liveExpectedText = plan.selectedMask;
+      plan.item.detection = {
+        ...plan.item.detection,
+        startIndex: plan.startIndex,
+        endIndex: plan.startIndex + plan.selectedMask.length
+      };
+    }
+
+    this.persistAllItemStates();
+    return plans.map((plan) => plan.item);
+  }
+
+  private applyContentEditableReset(): boolean {
+    const redacted = this.activeItems
+      .filter((item) => item.status === 'redacted')
+      .map((item) => {
+        const range = item.liveRange;
+        const expectedText = item.liveExpectedText ?? item.selectedMask;
+        if (!range) {
+          return null;
+        }
+
+        return {
+          item,
+          range,
+          expectedText
+        };
+      })
+      .filter((entry) => entry !== null)
+      .sort((left, right) => right.range.startIndex - left.range.startIndex);
+
+    if (!redacted.length) {
+      for (const item of this.activeItems) {
+        item.status = 'pending';
+        item.liveRange = undefined;
+        item.liveExpectedText = undefined;
+      }
+      this.persistAllItemStates();
+      return true;
+    }
+
+    const replacements: TextReplacement[] = redacted.map((entry) => ({
+      startIndex: entry.range.startIndex,
+      endIndex: entry.range.endIndex,
+      expectedText: entry.expectedText,
+      replacementText: entry.item.detection.text
+    }));
+
+    const { applied } = this.applyContentEditableReplacements(this.latestText, replacements);
+    if (!applied) {
+      return false;
+    }
+
+    for (const entry of redacted) {
+      const delta = entry.item.detection.text.length - entry.expectedText.length;
+      this.shiftItemRangesAfter(entry.range.endIndex, delta, entry.item.id);
+      entry.item.status = 'pending';
+      entry.item.liveRange = undefined;
+      entry.item.liveExpectedText = undefined;
+      entry.item.detection = {
+        ...entry.item.detection,
+        startIndex: entry.range.startIndex,
+        endIndex: entry.range.startIndex + entry.item.detection.text.length
+      };
+    }
+
+    for (const item of this.activeItems) {
+      if (item.status === 'ignored') {
+        item.status = 'pending';
+        item.liveRange = undefined;
+        item.liveExpectedText = undefined;
+      }
+    }
+
+    this.persistAllItemStates();
+    return true;
   }
 
   private async emitEvent(
@@ -375,6 +812,13 @@ export class InterventionController {
       status: previousState?.status ?? 'pending',
       selectedFormatId: selectedFormat?.id ?? defaultFormatId,
       selectedMask: formatFromState?.mask ?? previousState?.selectedMask ?? selectedFormat?.mask ?? detection.suggestedMask,
+      liveRange: previousState?.liveRange
+        ? {
+            startIndex: previousState.liveRange.startIndex,
+            endIndex: previousState.liveRange.endIndex
+          }
+        : undefined,
+      liveExpectedText: previousState?.liveExpectedText,
       formats
     };
   }
@@ -401,7 +845,14 @@ export class InterventionController {
       nextStateMap.set(item.id, {
         status: item.status,
         selectedFormatId: item.selectedFormatId,
-        selectedMask: item.selectedMask
+        selectedMask: item.selectedMask,
+        liveRange: item.liveRange
+          ? {
+              startIndex: item.liveRange.startIndex,
+              endIndex: item.liveRange.endIndex
+            }
+          : undefined,
+        liveExpectedText: item.liveExpectedText
       });
     }
 
@@ -410,15 +861,16 @@ export class InterventionController {
     return nextItems;
   }
 
-  private applySelectedRedactions(
+  private resolveSelectedRedactions(
     baseText: string,
     items: InterventionItem[]
-  ): string {
+  ): ResolvedRedactionResult {
     const redacted = items
       .filter((item) => item.status === 'redacted')
       .sort((left, right) => right.detection.startIndex - left.detection.startIndex);
 
     let result = baseText;
+    const replacements: TextReplacement[] = [];
 
     for (const item of redacted) {
       const { startIndex, endIndex } = item.detection;
@@ -427,14 +879,86 @@ export class InterventionController {
         continue;
       }
 
+      if (result.slice(startIndex, endIndex) !== item.detection.text) {
+        continue;
+      }
+
+      replacements.push({
+        startIndex,
+        endIndex,
+        expectedText: item.detection.text,
+        replacementText: item.selectedMask
+      });
       result = result.slice(0, startIndex) + item.selectedMask + result.slice(endIndex);
     }
 
-    return result;
+    return {
+      text: result,
+      replacements
+    };
   }
 
-  private updateInputText(nextText: string): void {
+  private updateInputText(
+    baseText: string,
+    nextText: string,
+    replacements: TextReplacement[]
+  ): boolean {
+    const currentText = this.latestText;
+
+    this.pendingProgrammaticText = nextText;
+    this.latestText = nextText;
+
+    if (replacements.length) {
+      const updatedInPlace = this.adapter.applyTextReplacements(baseText, replacements);
+      if (updatedInPlace) {
+        if (this.isContentEditableInput()) {
+          this.baselineText = nextText;
+        }
+        return true;
+      }
+    }
+
+    if (this.isContentEditableInput()) {
+      this.pendingProgrammaticText = null;
+      this.latestText = currentText;
+      this.baselineText = currentText;
+      return false;
+    }
+
+    const fallbackDiffReplacements = buildDiffReplacement(currentText, nextText);
+    if (fallbackDiffReplacements.length) {
+      const updatedFromCurrent = this.adapter.applyTextReplacements(
+        currentText,
+        fallbackDiffReplacements
+      );
+      if (updatedFromCurrent) {
+        return true;
+      }
+    }
+
     this.adapter.setText(nextText);
+    return true;
+  }
+
+  private resetResolvedRedactionsToPending(): void {
+    for (const item of this.activeItems) {
+      if (item.status !== 'redacted') {
+        continue;
+      }
+
+      item.status = 'pending';
+      item.liveRange = undefined;
+      item.liveExpectedText = undefined;
+      this.persistItemState(item);
+    }
+  }
+
+  private handleRedactionApplyFailure(): void {
+    this.pendingProgrammaticText = null;
+    this.latestText = this.adapter.captureText();
+    this.baselineText = this.latestText;
+    this.resetResolvedRedactionsToPending();
+    this.render();
   }
 
   private hasResolvedDecisions(): boolean {
@@ -445,19 +969,30 @@ export class InterventionController {
     return this.baselineText ?? this.latestText;
   }
 
+  private shouldApplyImmediatePreview(): boolean {
+    return this.adapter.getInputType() !== 'contenteditable';
+  }
+
   private applyImmediatePreviewFromCurrentState(): void {
-    const nextText = this.applySelectedRedactions(
-      this.getRedactionBaselineText(),
+    if (!this.shouldApplyImmediatePreview()) {
+      return;
+    }
+
+    const baseText = this.getRedactionBaselineText();
+    const resolved = this.resolveSelectedRedactions(
+      baseText,
       this.activeItems
     );
+    const nextText = resolved.text;
 
     if (nextText === this.latestText) {
       return;
     }
 
-    this.pendingProgrammaticText = nextText;
-    this.latestText = nextText;
-    this.updateInputText(nextText);
+    const updated = this.updateInputText(baseText, nextText, resolved.replacements);
+    if (!updated) {
+      this.handleRedactionApplyFailure();
+    }
   }
 
   private submitWithBypass(): void {
@@ -489,14 +1024,19 @@ export class InterventionController {
     }
 
     const model = this.buildViewModel();
-    const updatedText = this.applySelectedRedactions(
-      this.getRedactionBaselineText(),
+    const baseText = this.getRedactionBaselineText();
+    const resolved = this.resolveSelectedRedactions(
+      baseText,
       this.activeItems
     );
+    const updatedText = resolved.text;
 
     if (updatedText !== this.latestText) {
-      this.latestText = updatedText;
-      this.updateInputText(updatedText);
+      const updated = this.updateInputText(baseText, updatedText, resolved.replacements);
+      if (!updated) {
+        this.handleRedactionApplyFailure();
+        return;
+      }
     }
 
     const actionLatencyMs =

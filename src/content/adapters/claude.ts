@@ -1,7 +1,7 @@
 import {
   BasePlatformAdapter,
+  captureContentEditableText,
   isVisibleElement,
-  normalizeCapturedText,
   pickByFallback,
   queryFirst
 } from './base';
@@ -30,17 +30,6 @@ const CLAUDE_BUTTON_SECONDARY = [
   'button[aria-label*="Send" i]',
   'button[aria-label*="send message" i]'
 ];
-
-const parseContentEditableHtml = (html: string): string => {
-  const withLineBreaks = html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(div|p|li|h[1-6])>/gi, '\n');
-
-  const container = document.createElement('div');
-  container.innerHTML = withLineBreaks;
-
-  return normalizeCapturedText(container.textContent ?? '');
-};
 
 const pickHeuristicEditable = (): HTMLElement | null => {
   const candidates = [
@@ -107,7 +96,7 @@ export class ClaudeAdapter extends BasePlatformAdapter {
       return '';
     }
 
-    return parseContentEditableHtml(input.innerHTML);
+    return captureContentEditableText(input);
   }
 
   setText(nextText: string): void {

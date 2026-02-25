@@ -1,5 +1,6 @@
 import {
   BasePlatformAdapter,
+  captureContentEditableText,
   isVisibleElement,
   normalizeCapturedText,
   pickByFallback,
@@ -49,17 +50,6 @@ const queryVisibleFirst = <T extends HTMLElement>(selectors: string[]): T | null
 
 const isContentEditableElement = (element: HTMLElement): boolean =>
   element.isContentEditable || element.getAttribute('contenteditable') === 'true';
-
-const parseContentEditableHtml = (html: string): string => {
-  const withLineBreaks = html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(div|p|li|h[1-6])>/gi, '\n');
-
-  const container = document.createElement('div');
-  container.innerHTML = withLineBreaks;
-
-  return normalizeCapturedText(container.textContent ?? '');
-};
 
 const pickHeuristicEditable = (): HTMLElement | null => {
   const candidates = [...document.querySelectorAll<HTMLElement>('div[contenteditable="true"]')].filter((candidate) =>
@@ -150,7 +140,7 @@ export class ChatGPTAdapter extends BasePlatformAdapter {
     }
 
     if (isContentEditableElement(input)) {
-      return parseContentEditableHtml(input.innerHTML);
+      return captureContentEditableText(input);
     }
 
     return '';

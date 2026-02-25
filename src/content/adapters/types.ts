@@ -17,6 +17,11 @@ export interface TextRange {
   endIndex: number;
 }
 
+export interface TextReplacement extends TextRange {
+  expectedText: string;
+  replacementText: string;
+}
+
 export interface PlatformAdapter {
   readonly platformId: PlatformId;
   readonly platformName: string;
@@ -26,6 +31,7 @@ export interface PlatformAdapter {
   getInputType(): InputType;
   captureText(): string;
   setText(nextText: string): void;
+  applyTextReplacements(baseText: string, replacements: TextReplacement[]): boolean;
   onTextChanged(callback: (text: string) => void): () => void;
   getSubmitButton(): HTMLElement | null;
   onSubmitIntercept(callback: (event: Event) => boolean): () => void;

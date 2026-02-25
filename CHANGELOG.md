@@ -3,6 +3,70 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Intervention: Restored immediate contenteditable redaction using explicit span operations with live range tracking.
+  - Files: `src/content/intervention/controller.ts`, `src/content/intervention/types.ts`
+  - Behavior: `Redact`/`Undo`/`Redact All`/`Reset` now mutate contenteditable prompts immediately again without using broad diff synthesis.
+  - Behavior: contenteditable replacements now track per-item live offsets (`liveRange`, `liveExpectedText`) so far-apart redactions remain index-safe after length shifts.
+  - Behavior: contenteditable no longer uses diff-based fallback or `setText` fallback; failed applies stay fail-safe (skip operation, preserve current text/state).
+  - Behavior: `Redact All` in contenteditable is atomic (all-or-none) against the current editor text.
+
+- Tests: Added immediate contenteditable regression coverage for index shift, undo targeting, atomic redact-all, and no-submit re-mutation.
+  - Files: `tests/content/intervention-controller.test.ts`, `tests/adapters/hooks.test.ts`
+  - Behavior: verifies multi-paragraph far-apart replacements preserve structure and only mutate matched spans.
+  - Validation: `npm test` and `npm run build` passed on February 25, 2026 (`20` files, `698` tests).
+
+- Intervention: Deferred contenteditable redaction preview to submit-time to prevent Redact-click formatting collapse.
+  - Files: `src/content/intervention/controller.ts`
+  - Behavior: for contenteditable editors, `Redact`/`Undo`/`Redact All`/`Reset` update intervention state only and no longer mutate prompt text immediately.
+  - Behavior: redaction text mutations for contenteditable now occur only during submit flow via safe replacement path; if apply fails, submit aborts and items revert to pending.
+
+- Tests: Added contenteditable deferred-preview regression coverage.
+  - Files: `tests/content/intervention-controller.test.ts`
+  - Behavior: verifies Redact does not change prompt text immediately, submit applies masking when safe, and replacement failure keeps text unchanged with no send.
+  - Validation: `npm test -- --run tests/content/intervention-controller.test.ts tests/adapters/hooks.test.ts` and `npm test` passed on February 25, 2026 (`20` files, `694` tests).
+
+- Intervention: Disabled destructive contenteditable fallback on redaction apply failure.
+  - Files: `src/content/intervention/controller.ts`
+  - Behavior: if in-place replacement cannot be applied, controller no longer falls back to `setText` for contenteditable; it restores local state to the current captured text and reverts resolved redactions back to pending.
+  - Behavior: submit now aborts when a required contenteditable redaction update fails, preventing false "redacted" send state.
+
+- Tests: Added contenteditable replacement-failure regression for safe no-op behavior.
+  - Files: `tests/content/intervention-controller.test.ts`
+  - Behavior: verifies failed replacement keeps original text unchanged and item remains actionable (`Redact` visible, no `Undo` state).
+  - Validation: `npm test -- --run tests/content/intervention-controller.test.ts tests/adapters/hooks.test.ts` and `npm test` passed on February 25, 2026 (`20` files, `693` tests).
+
+- Adapters: Added structured text replacement API and contenteditable-safe range patching.
+  - Files: `src/content/adapters/types.ts`, `src/content/adapters/base.ts`, `src/content/adapters/chatgpt.ts`, `src/content/adapters/claude.ts`
+  - Behavior: introduced `applyTextReplacements(baseText, replacements)` and DOM range replacement against mapped text-node offsets to avoid full-editor `textContent` rewrites when redacting.
+  - Behavior: unified contenteditable capture path via node-walk extraction so detection text and replacement mapping use the same representation.
+
+- Intervention: Switched redaction apply flow to replacement-list execution.
+  - Files: `src/content/intervention/controller.ts`
+  - Behavior: controller now resolves exact redaction spans into replacement objects, applies them through adapter in-place replacement first, and falls back to full set only when needed.
+
+- Tests: Added regression coverage for surgical contenteditable replacement path.
+  - Files: `tests/adapters/hooks.test.ts`, `tests/content/intervention-controller.test.ts`
+  - Behavior: verifies targeted replacement preserves paragraph structure and stale ranges no-op safely.
+  - Validation: `npm test -- --run tests/adapters/hooks.test.ts tests/content/intervention-controller.test.ts` and `npm test` passed on February 25, 2026 (`20` files, `692` tests).
+
+- Process: Established development progress logging protocol:
+  - Completed implementation tasks now require a same-turn `CHANGELOG.md` update plus a short chat summary.
+  - Each changelog entry should include scope tag, files touched, behavior change, and validation status.
+  - Partial/in-progress work is reported in chat only; follow-up entries are used for reversions.
+
+- Adapters: Preserved raw prompt formatting capture for replacement workflows.
+  - Files: `src/content/adapters/base.ts`
+  - Behavior: `normalizeCapturedText` is now pass-through so capture does not trim/collapse/normalize whitespace.
+
+- Intervention: Enforced exact-span replacement guard for redaction apply.
+  - Files: `src/content/intervention/controller.ts`
+  - Behavior: replacement now proceeds only when `slice(startIndex, endIndex) === detection.text`; stale mismatches are skipped.
+
+- Tests: Added formatting-preservation and mismatch-guard regressions.
+  - Files: `tests/adapters/hooks.test.ts`, `tests/content/intervention-controller.test.ts`
+  - Behavior: asserts preservation of leading/trailing spaces, triple newlines, multiline structure, and stale-span no-op replacement.
+  - Validation: `npm test` passed on February 25, 2026 (`20` files, `690` tests).
+
 - Implemented Phase 4 Intervention UX & Submit Control:
   - Rebuilt intervention UI from legacy inline banner to floating icon + Shadow DOM popover panel:
     - removed legacy `src/content/intervention/banner.ts`
