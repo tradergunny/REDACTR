@@ -157,4 +157,28 @@ describe('pii category corpus', () => {
       expect(hasCategory).toBe(false);
     });
   }
+
+  it('detects two phones on one line separated by a space', () => {
+    const detections = detectPII('Contacts: 415-555-2671 212-555-1212');
+    const phones = detections.filter((detection) => detection.category === 'phone');
+
+    expect(phones).toHaveLength(2);
+    expect(phones.map((phone) => phone.text)).toEqual(['415-555-2671', '212-555-1212']);
+  });
+
+  it('detects two phones separated by a single newline', () => {
+    const detections = detectPII('Contacts:\n415-555-2671\n212-555-1212');
+    const phones = detections.filter((detection) => detection.category === 'phone');
+
+    expect(phones).toHaveLength(2);
+    expect(phones.map((phone) => phone.text)).toEqual(['415-555-2671', '212-555-1212']);
+  });
+
+  it('detects phones with repeated spaces between groups', () => {
+    const detections = detectPII('Dial 415  555  2671 now');
+    const phones = detections.filter((detection) => detection.category === 'phone');
+
+    expect(phones).toHaveLength(1);
+    expect(phones[0]?.text).toBe('415  555  2671');
+  });
 });

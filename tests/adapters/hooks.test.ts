@@ -97,7 +97,7 @@ describe('adapter hooks and lifecycle', () => {
     adapter.cleanup();
   });
 
-  it('fires onTextChanged immediately on paste', () => {
+  it('fires onTextChanged with debounce on paste', async () => {
     document.body.innerHTML = '<textarea id="prompt-textarea"></textarea>';
     const textarea = document.querySelector('textarea');
     const adapter = new ChatGPTAdapter();
@@ -112,8 +112,70 @@ describe('adapter hooks and lifecycle', () => {
     textarea.value = 'pasted';
     textarea.dispatchEvent(new Event('paste', { bubbles: true }));
 
+    await flushDebounce();
+
     expect(callback).toHaveBeenCalledTimes(1);
     expect(callback).toHaveBeenCalledWith('pasted');
+
+    unsubscribe();
+    adapter.cleanup();
+  });
+
+  it('captures settled content on paste for contenteditable editors', async () => {
+    document.body.innerHTML = '<div contenteditable="true" role="textbox">before</div>';
+    const editable = document.querySelector('div[contenteditable="true"]');
+    const adapter = new ClaudeAdapter();
+    const callback = vi.fn();
+
+    const unsubscribe = adapter.onTextChanged(callback);
+
+    if (!editable) {
+      throw new Error('contenteditable missing in test');
+    }
+
+    editable.dispatchEvent(new Event('paste', { bubbles: true }));
+    editable.innerHTML = 'after';
+
+    await Promise.resolve();
+    await flushDebounce();
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenLastCalledWith('after');
+
+    unsubscribe();
+    adapter.cleanup();
+  });
+
+  it('produces equivalent capture for typed and pasted content', async () => {
+    document.body.innerHTML = '<div contenteditable="true" role="textbox"></div>';
+    const editable = document.querySelector('div[contenteditable="true"]');
+    const adapter = new ClaudeAdapter();
+    const callback = vi.fn();
+    const payload = '415-555-2671 212-555-1212';
+
+    const unsubscribe = adapter.onTextChanged(callback);
+
+    if (!editable) {
+      throw new Error('contenteditable missing in test');
+    }
+
+    editable.innerHTML = payload;
+    editable.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushDebounce();
+    const typedCapture = callback.mock.lastCall?.[0];
+
+    callback.mockClear();
+
+    editable.innerHTML = '';
+    editable.dispatchEvent(new Event('paste', { bubbles: true }));
+    editable.innerHTML = payload;
+
+    await Promise.resolve();
+    await flushDebounce();
+    const pastedCapture = callback.mock.lastCall?.[0];
+
+    expect(typedCapture).toBe(payload);
+    expect(pastedCapture).toBe(payload);
 
     unsubscribe();
     adapter.cleanup();

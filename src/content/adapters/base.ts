@@ -228,7 +228,7 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
     };
 
     const handlePaste = (): void => {
-      emit();
+      queueEmit();
     };
 
     input.addEventListener('input', handleInputEvent);
