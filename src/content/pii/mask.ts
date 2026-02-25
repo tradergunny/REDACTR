@@ -47,6 +47,12 @@ export const generateMask = (text: string, category: PIICategory): string => {
       return `****-****-****-${digits.slice(-4).padStart(4, '*')}`;
     }
 
+    case 'card_cvv':
+      return text.replace(/\d/g, '*');
+
+    case 'card_expiry':
+      return text.replace(/\d/g, '*');
+
     case 'api_key':
       return `${text.slice(0, 8)}****`;
 

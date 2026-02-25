@@ -156,6 +156,24 @@ export class ChatGPTAdapter extends BasePlatformAdapter {
     return '';
   }
 
+  setText(nextText: string): void {
+    const input = this.detectInputElement();
+    if (!input) {
+      return;
+    }
+
+    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+      input.value = nextText;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+
+    if (isContentEditableElement(input)) {
+      input.textContent = nextText;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
   getSubmitButton(): HTMLElement | null {
     return pickByFallback<HTMLElement>([
       () => queryFirst<HTMLButtonElement>(CHATGPT_BUTTON_PRIMARY),

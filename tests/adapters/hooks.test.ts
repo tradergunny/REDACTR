@@ -26,6 +26,24 @@ describe('adapter hooks and lifecycle', () => {
     expect(adapter.captureText()).toBe('hello world');
   });
 
+  it('updates ChatGPT textarea text via setText', () => {
+    document.body.innerHTML = '<textarea id="prompt-textarea">hello world</textarea>';
+    const textarea = document.querySelector<HTMLTextAreaElement>('#prompt-textarea');
+    const adapter = new ChatGPTAdapter();
+
+    if (!textarea) {
+      throw new Error('textarea missing in test');
+    }
+
+    const inputSpy = vi.fn();
+    textarea.addEventListener('input', inputSpy);
+
+    adapter.setText('masked');
+
+    expect(textarea.value).toBe('masked');
+    expect(inputSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('exposes ChatGPT icon and input anchors', () => {
     document.body.innerHTML = `
       <form id="composer">
@@ -50,11 +68,50 @@ describe('adapter hooks and lifecycle', () => {
     expect(adapter.captureText()).toBe('123');
   });
 
+  it('updates ChatGPT contenteditable text via setText', () => {
+    document.body.innerHTML = `
+      <textarea class="wcDTda_fallbackTextarea" name="prompt-textarea" style="display: none;"></textarea>
+      <div contenteditable="true" class="ProseMirror" id="prompt-textarea"><p>123</p></div>
+    `;
+    const editable = document.querySelector<HTMLElement>('div[contenteditable="true"]');
+    const adapter = new ChatGPTAdapter();
+
+    if (!editable) {
+      throw new Error('contenteditable missing in test');
+    }
+
+    const inputSpy = vi.fn();
+    editable.addEventListener('input', inputSpy);
+
+    adapter.setText('masked');
+
+    expect(editable.textContent).toBe('masked');
+    expect(inputSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('captures Claude contenteditable text from innerHTML', () => {
     document.body.innerHTML = '<div contenteditable="true">one<br>two</div>';
     const adapter = new ClaudeAdapter();
 
     expect(adapter.captureText()).toBe('one\ntwo');
+  });
+
+  it('updates Claude contenteditable text via setText', () => {
+    document.body.innerHTML = '<div contenteditable="true">one<br>two</div>';
+    const editable = document.querySelector<HTMLElement>('div[contenteditable="true"]');
+    const adapter = new ClaudeAdapter();
+
+    if (!editable) {
+      throw new Error('contenteditable missing in test');
+    }
+
+    const inputSpy = vi.fn();
+    editable.addEventListener('input', inputSpy);
+
+    adapter.setText('masked');
+
+    expect(editable.textContent).toBe('masked');
+    expect(inputSpy).toHaveBeenCalledTimes(1);
   });
 
   it('exposes Claude icon and input anchors', () => {

@@ -20,6 +20,7 @@ export interface NumericCandidateDetection {
   checksumPassed: ChecksumPassed;
   matchedPrefixNetwork: CardNetwork;
   contextSignals: ContextSignals;
+  thaiIdByFormatContext: boolean;
 }
 
 interface RawNumericCandidate {
@@ -31,6 +32,8 @@ interface RawNumericCandidate {
 const CANDIDATE_REGEX = /(?<!\d)\d(?:[\s-]*\d)*(?!\d)/g;
 const MIN_DIGITS = 13;
 const MAX_DIGITS = 19;
+const THAI_FORMATTED_ID_REGEX = /^\d-\d{4}-\d{5}-\d{2}-\d$/;
+const THAI_COMPACT_ID_REGEX = /^\d{13}$/;
 
 const THAI_ID_KEYWORDS = [
   'national id',
@@ -167,6 +170,11 @@ export const detectThaiIdOrCardCandidates = (
     const matchedPrefixNetwork = detectCardNetwork(normalizedNumber);
     const isThaiValid =
       normalizedNumber.length === 13 && isThaiIdentifierChecksumValid(normalizedNumber);
+    const isThaiShape =
+      normalizedNumber.length === 13 &&
+      (THAI_FORMATTED_ID_REGEX.test(candidate.raw) || THAI_COMPACT_ID_REGEX.test(normalizedNumber));
+    const canFallbackToThaiContextShape =
+      isThaiShape && contextSignals.thaiKeywordNearby && !contextSignals.negativeKeywordNearby;
 
     if (isThaiValid) {
       detections.push({
@@ -177,7 +185,23 @@ export const detectThaiIdOrCardCandidates = (
         type: 'THAI_NATIONAL_ID',
         checksumPassed: 'THAI_ID',
         matchedPrefixNetwork,
-        contextSignals
+        contextSignals,
+        thaiIdByFormatContext: false
+      });
+      continue;
+    }
+
+    if (canFallbackToThaiContextShape) {
+      detections.push({
+        raw: candidate.raw,
+        normalizedNumber,
+        startIndex: candidate.startIndex,
+        endIndex: candidate.endIndex,
+        type: 'THAI_NATIONAL_ID',
+        checksumPassed: null,
+        matchedPrefixNetwork,
+        contextSignals,
+        thaiIdByFormatContext: true
       });
       continue;
     }
@@ -191,7 +215,8 @@ export const detectThaiIdOrCardCandidates = (
         type: 'CREDIT_CARD',
         checksumPassed: 'LUHN',
         matchedPrefixNetwork,
-        contextSignals
+        contextSignals,
+        thaiIdByFormatContext: false
       });
       continue;
     }
@@ -204,7 +229,8 @@ export const detectThaiIdOrCardCandidates = (
       type: 'NONE',
       checksumPassed: null,
       matchedPrefixNetwork,
-      contextSignals
+      contextSignals,
+      thaiIdByFormatContext: false
     });
   }
 

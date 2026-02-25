@@ -18,6 +18,8 @@ export const ALLOWLIST_MAX_ENTRIES = 100;
 
 const DEFAULT_ENABLED_CATEGORIES: PIICategory[] = [
   'credit_card',
+  'card_cvv',
+  'card_expiry',
   'bank_account',
   'ssn',
   'api_key',

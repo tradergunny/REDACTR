@@ -185,6 +185,8 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
 
   abstract captureText(): string;
 
+  abstract setText(nextText: string): void;
+
   abstract getSubmitButton(): HTMLElement | null;
 
   protected registerDisposer(disposer: () => void): () => void {

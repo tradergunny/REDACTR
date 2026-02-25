@@ -24,8 +24,20 @@ export const nationalIdRule: PIIRule = {
       }
 
       const scoreSignals: ScoreSignal[] = [];
+      let baseConfidence = 0.9;
+      let contextBonus = 0;
+      let rule = 'national_id.thai_checksum';
 
-      pushSignal(scoreSignals, 'thai_checksum_valid', 'validator', 0.08);
+      if (candidate.checksumPassed === 'THAI_ID') {
+        pushSignal(scoreSignals, 'thai_checksum_valid', 'validator', 0.08);
+      } else if (candidate.thaiIdByFormatContext) {
+        baseConfidence = 0.74;
+        contextBonus = 0.03;
+        rule = 'national_id.thai_format_context';
+        pushSignal(scoreSignals, 'thai_format_context_fallback', 'pattern', 0.02);
+      } else {
+        continue;
+      }
 
       if (candidate.contextSignals.thaiKeywordNearby) {
         pushSignal(scoreSignals, 'thai_context_present', 'context', 0.02);
@@ -41,10 +53,11 @@ export const nationalIdRule: PIIRule = {
 
       matches.push(
         makeRuleMatch(candidate.raw, candidate.startIndex, {
-          rule: 'national_id.thai_checksum',
+          rule,
           category: 'national_id',
           severity: 'high',
-          baseConfidence: 0.9,
+          baseConfidence,
+          contextBonus,
           normalizedText: candidate.normalizedNumber,
           validationStage: 'validated',
           scoreSignals,

@@ -7,8 +7,98 @@ const US_ADDRESS_REGEX =
 const THAI_ADDRESS_REGEX =
   /\b(?:ที่อยู่|addr(?:ess)?|shipping address|billing address)\b\s*[:-]?\s*([^\n]{8,140})/gi;
 
-const THAI_ADDRESS_TOKEN_REGEX = /(ถนน|ซอย|แขวง|เขต|จังหวัด|อำเภอ|ตำบล|หมู่)/i;
+const THAI_ADDRESS_TOKEN_REGEX = /(ถนน|ซอย|แขวง|เขต|จังหวัด|อำเภอ|ตำบล|หมู่|กรุงเทพมหานคร)/i;
+const THAI_ADDRESS_TOKEN_GLOBAL_REGEX =
+  /(ถนน|ซอย|แขวง|เขต|จังหวัด|อำเภอ|ตำบล|หมู่|กรุงเทพมหานคร)/gi;
+const THAI_ADMIN_TOKEN_REGEX = /(แขวง|เขต|จังหวัด|อำเภอ|ตำบล|กรุงเทพมหานคร)/i;
+const THAI_CHAR_REGEX = /[\u0E00-\u0E7F]/;
+const THAI_HOUSE_NUMBER_REGEX = /^\s*\d{1,4}(?:\/\d{1,4})?/;
+const THAI_POSTAL_REGEX = /\b\d{5}\b/;
 const US_POSTAL_REGEX = /\b\d{5}(?:-\d{4})?\b/;
+const THAI_FREEFORM_LOOKBACK = 140;
+const THAI_FREEFORM_LOOKAHEAD = 180;
+
+interface ThaiFreeformCandidate {
+  value: string;
+  startIndex: number;
+}
+
+const countThaiAddressTokens = (value: string): number => {
+  const expression = new RegExp(
+    THAI_ADDRESS_TOKEN_GLOBAL_REGEX.source,
+    THAI_ADDRESS_TOKEN_GLOBAL_REGEX.flags
+  );
+  let count = 0;
+  let token = expression.exec(value);
+  while (token) {
+    count += 1;
+    token = expression.exec(value);
+  }
+  return count;
+};
+
+const extractThaiFreeformCandidates = (input: string): ThaiFreeformCandidate[] => {
+  const candidates: ThaiFreeformCandidate[] = [];
+  const seenRanges = new Set<string>();
+  const expression = new RegExp(
+    THAI_ADDRESS_TOKEN_GLOBAL_REGEX.source,
+    THAI_ADDRESS_TOKEN_GLOBAL_REGEX.flags
+  );
+
+  let token = expression.exec(input);
+  while (token) {
+    const tokenStart = token.index ?? 0;
+    let segmentStart = tokenStart;
+    let segmentEnd = tokenStart + token[0].length;
+
+    while (
+      segmentStart > 0 &&
+      !/[\n.!?]/.test(input[segmentStart - 1]) &&
+      tokenStart - segmentStart < THAI_FREEFORM_LOOKBACK
+    ) {
+      segmentStart -= 1;
+    }
+
+    while (
+      segmentEnd < input.length &&
+      !/[\n.!?]/.test(input[segmentEnd]) &&
+      segmentEnd - tokenStart < THAI_FREEFORM_LOOKAHEAD
+    ) {
+      segmentEnd += 1;
+    }
+
+    const rawSegment = input.slice(segmentStart, segmentEnd);
+    const houseNumberOffset = rawSegment.search(/\d{1,4}(?:\/\d{1,4})?(?=\s*[\u0E00-\u0E7F])/);
+    if (houseNumberOffset > 0) {
+      segmentStart += houseNumberOffset;
+    }
+
+    const segment = input.slice(segmentStart, segmentEnd).trim();
+    if (!segment) {
+      token = expression.exec(input);
+      continue;
+    }
+
+    const trimOffset = input.slice(segmentStart, segmentEnd).indexOf(segment);
+    const normalizedStart = segmentStart + Math.max(0, trimOffset);
+    const rangeKey = `${normalizedStart}:${normalizedStart + segment.length}`;
+
+    if (seenRanges.has(rangeKey)) {
+      token = expression.exec(input);
+      continue;
+    }
+
+    seenRanges.add(rangeKey);
+    candidates.push({
+      value: segment,
+      startIndex: normalizedStart
+    });
+
+    token = expression.exec(input);
+  }
+
+  return candidates;
+};
 
 export const addressRule: PIIRule = {
   id: 'address.conservative',
@@ -92,6 +182,51 @@ export const addressRule: PIIRule = {
           validationStage: 'validated',
           scoreSignals,
           countryHint: THAI_ADDRESS_TOKEN_REGEX.test(value) ? 'th' : 'us'
+        })
+      );
+    }
+
+    for (const candidate of extractThaiFreeformCandidates(input)) {
+      const value = candidate.value;
+      const tokenCount = countThaiAddressTokens(value);
+      const hasThaiCharacters = THAI_CHAR_REGEX.test(value);
+      const hasThaiAdminToken = THAI_ADMIN_TOKEN_REGEX.test(value);
+      const hasHouseNumber = THAI_HOUSE_NUMBER_REGEX.test(value);
+      const hasPostalCode = THAI_POSTAL_REGEX.test(value);
+
+      if (!hasThaiCharacters) {
+        continue;
+      }
+
+      if (tokenCount < 2 || !hasThaiAdminToken) {
+        continue;
+      }
+
+      if (!hasHouseNumber && !hasPostalCode) {
+        continue;
+      }
+
+      const scoreSignals: ScoreSignal[] = [];
+      pushSignal(scoreSignals, 'thai_freeform_chars_present', 'validator', 0.02);
+      pushSignal(scoreSignals, 'thai_freeform_tokens_present', 'validator', 0.03);
+      pushSignal(scoreSignals, 'thai_freeform_admin_token', 'validator', 0.03);
+      if (hasHouseNumber) {
+        pushSignal(scoreSignals, 'thai_freeform_house_number', 'validator', 0.02);
+      }
+      if (hasPostalCode) {
+        pushSignal(scoreSignals, 'thai_freeform_postal_code', 'validator', 0.03);
+      }
+
+      matches.push(
+        makeRuleMatch(value, candidate.startIndex, {
+          rule: 'address.thai_freeform',
+          category: 'address',
+          severity: 'low',
+          baseConfidence: 0.65,
+          contextBonus: 0.03,
+          validationStage: 'validated',
+          scoreSignals,
+          countryHint: 'th'
         })
       );
     }

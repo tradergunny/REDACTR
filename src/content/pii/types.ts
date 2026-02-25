@@ -1,5 +1,7 @@
 export type PIICategory =
   | 'credit_card'
+  | 'card_cvv'
+  | 'card_expiry'
   | 'bank_account'
   | 'ssn'
   | 'api_key'

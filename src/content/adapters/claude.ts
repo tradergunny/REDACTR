@@ -110,6 +110,16 @@ export class ClaudeAdapter extends BasePlatformAdapter {
     return parseContentEditableHtml(input.innerHTML);
   }
 
+  setText(nextText: string): void {
+    const input = this.detectInputElement();
+    if (!input) {
+      return;
+    }
+
+    input.textContent = nextText;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
   getSubmitButton(): HTMLElement | null {
     return pickByFallback<HTMLElement>([
       () => queryFirst<HTMLButtonElement>(CLAUDE_BUTTON_PRIMARY),

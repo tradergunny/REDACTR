@@ -2,6 +2,7 @@ import type { PIIRule } from '../types';
 import { addressRule } from './address';
 import { apiKeyRule } from './api-key';
 import { bankAccountRule } from './bank-account';
+import { cardCvvRule, cardExpiryRule } from './card-metadata';
 import { creditCardRule } from './credit-card';
 import { emailRule } from './email';
 import { employeeNameRule } from './employee-name';
@@ -13,6 +14,8 @@ import { ssnRule } from './ssn';
 
 export const PII_RULES: PIIRule[] = [
   creditCardRule,
+  cardCvvRule,
+  cardExpiryRule,
   bankAccountRule,
   ssnRule,
   apiKeyRule,

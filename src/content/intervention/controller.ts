@@ -59,6 +59,10 @@ export class InterventionController {
 
   private latestText = '';
 
+  private baselineText: string | null = null;
+
+  private pendingProgrammaticText: string | null = null;
+
   private activeItems: InterventionItem[] = [];
 
   private allowlistEntries: AllowlistEntry[] = [];
@@ -128,6 +132,7 @@ export class InterventionController {
           redaction_format: format.label
         });
 
+        this.applyImmediatePreviewFromCurrentState();
         this.render();
       },
       onIgnoreItem: (itemId) => {
@@ -165,6 +170,7 @@ export class InterventionController {
           selectedMask: item.selectedMask
         });
 
+        this.applyImmediatePreviewFromCurrentState();
         this.render();
       },
       onRedactAll: (itemIds) => {
@@ -206,6 +212,7 @@ export class InterventionController {
           severities: touched.map((item) => item.detection.severity)
         });
 
+        this.applyImmediatePreviewFromCurrentState();
         this.render();
       },
       onSubmitResolved: () => {
@@ -224,6 +231,7 @@ export class InterventionController {
           });
         }
 
+        this.applyImmediatePreviewFromCurrentState();
         this.render();
       }
     });
@@ -339,6 +347,8 @@ export class InterventionController {
     this.activeItems = [];
     this.itemStateMap.clear();
     this.interventionStartedAt = null;
+    this.baselineText = null;
+    this.pendingProgrammaticText = null;
     this.render();
   }
 
@@ -424,19 +434,30 @@ export class InterventionController {
   }
 
   private updateInputText(nextText: string): void {
-    const input = this.adapter.detectInputElement();
-    if (!input) {
+    this.adapter.setText(nextText);
+  }
+
+  private hasResolvedDecisions(): boolean {
+    return this.activeItems.some((item) => item.status !== 'pending');
+  }
+
+  private getRedactionBaselineText(): string {
+    return this.baselineText ?? this.latestText;
+  }
+
+  private applyImmediatePreviewFromCurrentState(): void {
+    const nextText = this.applySelectedRedactions(
+      this.getRedactionBaselineText(),
+      this.activeItems
+    );
+
+    if (nextText === this.latestText) {
       return;
     }
 
-    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
-      input.value = nextText;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      return;
-    }
-
-    input.textContent = nextText;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    this.pendingProgrammaticText = nextText;
+    this.latestText = nextText;
+    this.updateInputText(nextText);
   }
 
   private submitWithBypass(): void {
@@ -468,7 +489,10 @@ export class InterventionController {
     }
 
     const model = this.buildViewModel();
-    const updatedText = this.applySelectedRedactions(this.latestText, this.activeItems);
+    const updatedText = this.applySelectedRedactions(
+      this.getRedactionBaselineText(),
+      this.activeItems
+    );
 
     if (updatedText !== this.latestText) {
       this.latestText = updatedText;
@@ -499,12 +523,28 @@ export class InterventionController {
   }
 
   onScanResult(text: string, detections: DetectionResult[]): void {
+    if (this.pendingProgrammaticText !== null && text === this.pendingProgrammaticText) {
+      this.pendingProgrammaticText = null;
+      this.latestText = text;
+      return;
+    }
+
+    const previousText = this.latestText;
+    const hadResolvedDecisions = this.hasResolvedDecisions();
+    const textChanged = text !== previousText;
+
     this.latestText = text;
 
     if (!text.length) {
       this.clearPromptState();
       return;
     }
+
+    if (hadResolvedDecisions && textChanged) {
+      this.itemStateMap.clear();
+    }
+
+    this.baselineText = text;
 
     const filteredDetections = detections.filter((detection) => {
       if (detection.decision === 'ignore') {

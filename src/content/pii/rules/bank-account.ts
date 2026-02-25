@@ -13,6 +13,7 @@ import {
 } from './shared';
 
 const ACCOUNT_NUMBER_REGEX = /\b\d{7,17}\b/g;
+const THAI_FORMATTED_ACCOUNT_REGEX = /\b\d{3}-\d-\d{5}-\d\b/g;
 
 const ROUTING_NUMBER_REGEX = /\b\d{9}\b/g;
 const IBAN_REGEX = /\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/g;
@@ -33,6 +34,21 @@ const BANK_KEYWORDS = [
 ];
 
 const ROUTING_KEYWORDS = ['routing', 'aba'];
+const THAI_BANK_NAME_KEYWORDS = [
+  'bangkok bank',
+  'kasikorn',
+  'krungsri',
+  'krungthai',
+  'scb',
+  'siam commercial',
+  'ttb',
+  'uob thailand',
+  'ธนาคารกรุงเทพ',
+  'ธนาคารกสิกรไทย',
+  'ธนาคารกรุงไทย',
+  'ธนาคารกรุงศรีอยุธยา',
+  'ธนาคารไทยพาณิชย์'
+];
 const NEGATIVE_KEYWORDS = [
   'invoice',
   'ticket',
@@ -51,23 +67,25 @@ export const bankAccountRule: PIIRule = {
   severity: 'critical',
   detect(input: string): RuleMatch[] {
     const matches: RuleMatch[] = [];
-
-    for (const candidate of runGlobalRegex(ACCOUNT_NUMBER_REGEX, input)) {
-      const value = candidate[0];
-      const startIndex = candidate.index ?? 0;
+    const pushAccountMatch = (value: string, startIndex: number): void => {
       const endIndex = startIndex + value.length;
       const scoreSignals: ScoreSignal[] = [];
+      const normalizedDigits = value.replace(/\D/g, '');
 
       if (!hasKeywordNearby(input, startIndex, endIndex, BANK_KEYWORDS, 56)) {
-        continue;
+        return;
       }
 
       if (hasNegativeKeywordNearby(input, startIndex, endIndex, NEGATIVE_KEYWORDS, 32)) {
-        continue;
+        return;
       }
 
-      if (value.length >= 10) {
+      if (normalizedDigits.length >= 10) {
         pushSignal(scoreSignals, 'account_length_high_signal', 'heuristic', 0.02);
+      }
+
+      if (hasKeywordNearby(input, startIndex, endIndex, THAI_BANK_NAME_KEYWORDS, 96)) {
+        pushSignal(scoreSignals, 'thai_bank_name_nearby', 'context', 0.03);
       }
 
       matches.push(
@@ -77,10 +95,19 @@ export const bankAccountRule: PIIRule = {
           severity: 'critical',
           baseConfidence: 0.82,
           contextBonus: 0.08,
+          normalizedText: normalizedDigits,
           validationStage: 'validated',
           scoreSignals
         })
       );
+    };
+
+    for (const candidate of runGlobalRegex(ACCOUNT_NUMBER_REGEX, input)) {
+      pushAccountMatch(candidate[0], candidate.index ?? 0);
+    }
+
+    for (const candidate of runGlobalRegex(THAI_FORMATTED_ACCOUNT_REGEX, input)) {
+      pushAccountMatch(candidate[0], candidate.index ?? 0);
     }
 
     for (const candidate of runGlobalRegex(ROUTING_NUMBER_REGEX, input)) {

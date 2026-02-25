@@ -76,7 +76,8 @@ export const hasKeywordNearby = (
   return keywords.some((keyword) => context.includes(keyword.toLowerCase()));
 };
 
-export const hasSeparator = (value: string): boolean => /[\s().-]/.test(value);
+export const hasSeparator = (value: string): boolean =>
+  /[\s().\-\u00AD\u2060\u200B\u200C\u200D\uFEFF]/.test(value);
 
 export const hasMixedCaseNameShape = (value: string): boolean =>
   /^([A-Z][a-z]+)(\s+[A-Z][a-z]+){1,2}$/.test(value.trim());

@@ -25,6 +25,7 @@ export interface PlatformAdapter {
   detectInputElement(): HTMLElement | null;
   getInputType(): InputType;
   captureText(): string;
+  setText(nextText: string): void;
   onTextChanged(callback: (text: string) => void): () => void;
   getSubmitButton(): HTMLElement | null;
   onSubmitIntercept(callback: (event: Event) => boolean): () => void;

@@ -76,6 +76,9 @@ const setupController = (): ControllerFixture => {
     detectInputElement: () => input,
     getInputType: () => 'textarea',
     captureText: () => input.value,
+    setText: (nextText: string) => {
+      input.value = nextText;
+    },
     onTextChanged: () => () => undefined,
     getSubmitButton: () => submitButton,
     onSubmitIntercept: () => () => undefined,
@@ -223,13 +226,17 @@ describe('InterventionController', () => {
     expect(result).toBe(true);
   });
 
-  it('preserves resolved state on exact-match rescan and resets on text change', async () => {
-    const { controller } = setupController();
+  it('redact immediately masks input and undo restores exact original text', async () => {
+    const { controller, input } = setupController();
+    const text = 'email john@example.com';
+    input.value = text;
 
-    controller.onScanResult('email john@example.com', [mediumDetection]);
+    controller.onScanResult(text, [mediumDetection]);
 
-    let shadow = openPanelByIcon();
-    const redactButton = shadow.querySelector<HTMLButtonElement>('[data-redactr-card="true"] button[data-redactr-primary="true"]');
+    const shadow = openPanelByIcon();
+    const redactButton = shadow.querySelector<HTMLButtonElement>(
+      '[data-redactr-card="true"] button[data-redactr-primary="true"]'
+    );
     if (!redactButton) {
       throw new Error('redact button missing');
     }
@@ -237,24 +244,98 @@ describe('InterventionController', () => {
     redactButton.click();
     await flushAsync();
 
-    controller.onScanResult('email john@example.com', [mediumDetection]);
-    shadow = getPanelShadowRoot();
+    expect(input.value).toBe('email j***@example.com');
 
-    expect(shadow.textContent).toContain('Undo');
+    const undoButton = shadow.querySelector<HTMLButtonElement>('[data-redactr-resolved="true"] button');
+    if (!undoButton) {
+      throw new Error('undo button missing');
+    }
 
-    controller.onScanResult('email john2@example.com', [
+    undoButton.click();
+    await flushAsync();
+
+    expect(input.value).toBe(text);
+  });
+
+  it('manual edit after redaction resets resolved state and rescans as pending', async () => {
+    const { controller, input } = setupController();
+    const text = 'email john@example.com';
+    input.value = text;
+
+    controller.onScanResult(text, [mediumDetection]);
+
+    let shadow = openPanelByIcon();
+    const redactButton = shadow.querySelector<HTMLButtonElement>(
+      '[data-redactr-card="true"] button[data-redactr-primary="true"]'
+    );
+    if (!redactButton) {
+      throw new Error('redact button missing');
+    }
+
+    redactButton.click();
+    await flushAsync();
+    expect(input.value).toBe('email j***@example.com');
+
+    const editedText = 'email jane@example.com';
+    input.value = editedText;
+    controller.onScanResult(editedText, [
       {
         ...mediumDetection,
-        text: 'john2@example.com',
+        text: 'jane@example.com',
         startIndex: 6,
-        endIndex: 23,
+        endIndex: 22,
         suggestedMask: 'j***@example.com'
       }
     ]);
-
     shadow = getPanelShadowRoot();
+
     expect(shadow.textContent).toContain('Redact');
     expect(shadow.textContent).not.toContain('Undo');
+    expect(input.value).toBe(editedText);
+  });
+
+  it('reset restores full pre-redaction prompt snapshot', async () => {
+    const { controller, input } = setupController();
+    const text = 'email john@example.com ssn 123-45-6789';
+    input.value = text;
+
+    controller.onScanResult(text, [
+      {
+        ...mediumDetection,
+        startIndex: 6,
+        endIndex: 22
+      },
+      {
+        ...criticalDetection,
+        startIndex: 27,
+        endIndex: 38
+      }
+    ]);
+
+    const shadow = openPanelByIcon();
+    const redactAllButton = shadow.querySelector<HTMLButtonElement>(
+      '[data-redactr-footer="true"] button[data-redactr-primary="true"]'
+    );
+    if (!redactAllButton) {
+      throw new Error('redact all button missing');
+    }
+
+    redactAllButton.click();
+    await flushAsync();
+
+    expect(input.value).toBe('email j***@example.com ssn [SSN]');
+
+    const resetButton = shadow.querySelector<HTMLButtonElement>(
+      '[data-redactr-footer="true"] button[data-redactr-muted="true"]'
+    );
+    if (!resetButton) {
+      throw new Error('reset button missing');
+    }
+
+    resetButton.click();
+    await flushAsync();
+
+    expect(input.value).toBe(text);
   });
 
   it('clears per-item state after submit; ignored item is flagged again in new prompt', async () => {

@@ -21,6 +21,8 @@ const CHUNK_OVERLAP = 128;
 const CATEGORY_OVERLAP_PRIORITY: Record<PIICategory, number> = {
   api_key: 120,
   credit_card: 115,
+  card_cvv: 96,
+  card_expiry: 86,
   ssn: 110,
   bank_account: 108,
   national_id: 104,

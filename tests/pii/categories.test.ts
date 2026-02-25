@@ -174,6 +174,46 @@ describe('pii category corpus', () => {
     expect(phones.map((phone) => phone.text)).toEqual(['415-555-2671', '212-555-1212']);
   });
 
+  it('detects two phones separated by comma', () => {
+    const detections = detectPII('Contacts: 415-555-2671, 212-555-1212');
+    const phones = detections.filter((detection) => detection.category === 'phone');
+
+    expect(phones).toHaveLength(2);
+    expect(phones.map((phone) => phone.text)).toEqual(['415-555-2671', '212-555-1212']);
+  });
+
+  it('detects two phones separated by a blank line', () => {
+    const detections = detectPII('Contacts:\n415-555-2671\n\n212-555-1212');
+    const phones = detections.filter((detection) => detection.category === 'phone');
+
+    expect(phones).toHaveLength(2);
+    expect(phones.map((phone) => phone.text)).toEqual(['415-555-2671', '212-555-1212']);
+  });
+
+  it('detects a phone with zero-width spaces between groups', () => {
+    const detections = detectPII('Dial 415\u200B-\u200B555\u200B-\u200B2671 now');
+    const phones = detections.filter((detection) => detection.category === 'phone');
+
+    expect(phones).toHaveLength(1);
+    expect(phones[0]?.text).toBe('415\u200B-\u200B555\u200B-\u200B2671');
+  });
+
+  it('detects a phone with soft hyphen separators between groups', () => {
+    const detections = detectPII('Dial 415\u00AD-\u00AD555\u00AD-\u00AD2671 now');
+    const phones = detections.filter((detection) => detection.category === 'phone');
+
+    expect(phones).toHaveLength(1);
+    expect(phones[0]?.text).toBe('415\u00AD-\u00AD555\u00AD-\u00AD2671');
+  });
+
+  it('detects a phone with word joiner separators between groups', () => {
+    const detections = detectPII('Dial 415\u2060-\u2060555\u2060-\u20602671 now');
+    const phones = detections.filter((detection) => detection.category === 'phone');
+
+    expect(phones).toHaveLength(1);
+    expect(phones[0]?.text).toBe('415\u2060-\u2060555\u2060-\u20602671');
+  });
+
   it('detects phones with repeated spaces between groups', () => {
     const detections = detectPII('Dial 415  555  2671 now');
     const phones = detections.filter((detection) => detection.category === 'phone');
