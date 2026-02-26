@@ -1,9 +1,23 @@
 # REDACTR — Developer Blueprint
 
 **Version:** 2.0  
-**Last Updated:** 2026-02-16  
+**Last Updated:** 2026-02-26  
 **Purpose:** Full-stack development instruction guide for Cursor / Claude  
-**Status:** Implementation-Ready  
+**Status:** Legacy blueprint with current-state alignment addendum  
+
+---
+
+## Current-State Alignment (2026-02-26)
+
+This blueprint began as a pre-implementation plan. Current implementation truth now lives in code under `src/**` and `CHANGELOG.md` (`[Unreleased]`).
+
+- Shipped: Phase 1 Foundation, Phase 2 Platform Adapters, Phase 3 PII Detection Engine, Phase 4 Intervention UX and Submit Control.
+- Planned: Phase 5 Settings expansion and Phase 6 Dashboard.
+- Active intervention model: floating icon + popover panel with per-item actions (`Redact`, `Ignore`), batch action (`Redact All`), and guarded override (`Send Anyway` with confirmation for Critical/High).
+- Active adapter contract: `getIconAnchor`, `getInputAreaWrapper`, and `applyTextReplacements` are in use; legacy `getWarningAnchor` and `renderWarning` are deprecated.
+- Active event model: `scan_completed`, `panel_opened`, `panel_closed`, `pii_item_redacted`, `pii_item_ignored`, `pii_batch_redacted`, `submit_intercepted`, `submit_confirmed`, `send_anyway_confirmed`, `warning_dismissed`, `settings_changed`, `pattern_allowlisted`, `dashboard_viewed`.
+
+Historical planning content remains below for roadmap context.
 
 ---
 
@@ -133,11 +147,14 @@ interface PlatformAdapter {
   detectInputElement(): HTMLElement | null;
   getInputType(): 'textarea' | 'contenteditable' | 'input';
   captureText(): string;
+  setText(nextText: string): void;
+  applyTextReplacements(baseText: string, replacements: TextReplacement[]): boolean;
   onTextChanged(callback: (text: string) => void): () => void; // returns cleanup fn
   getSubmitButton(): HTMLElement | null;
   onSubmitIntercept(callback: (event: Event) => boolean): () => void; // return false to prevent
-  getWarningAnchor(): HTMLElement | null;
-  renderWarning(warning: WarningConfig): HTMLElement;
+  getIconAnchor(): HTMLElement | null;
+  getIconPlacement(): IconPlacementConfig;
+  getInputAreaWrapper(): HTMLElement | null;
   renderInlineHighlight(range: TextRange, severity: Severity): void;
   cleanup(): void;
 }
@@ -196,9 +213,9 @@ interface DetectionResult {
 
 | Severity | Color | User Experience | Auto-action |
 |----------|-------|-----------------|-------------|
-| Critical | Red | Banner, submit blocked until acknowledged | Pre-check "mask" option |
-| High | Orange | Banner, submit requires confirmation | Show mask suggestion |
-| Medium | Yellow | Non-blocking banner | Show mask option |
+| Critical | Red | Panel-driven flow, submit blocked until acknowledged | Pre-check redaction option |
+| High | Orange | Panel-driven flow, submit requires confirmation | Show redaction suggestion |
+| Medium | Yellow | Non-blocking panel signal | Show redaction option |
 | Low | Blue | Info badge | Log only |
 
 ### 4.4 Masking Logic
@@ -243,7 +260,7 @@ function generateMask(text: string, category: PIICategory): string {
 
 ---
 
-## 5) Intervention UX
+## 5) Intervention UX (Historical Blueprint; implemented model uses panel flow)
 
 ### 5.1 Pre-submit Interception Flow
 
@@ -261,37 +278,32 @@ User types prompt
        └─── PII detected
                │
                ▼
-        Show warning banner
+        Open intervention panel
                │
                ├─── Severity: Critical/High
                │         │
                │         ▼
                │    Block submit until user action:
-               │    [Mask & Send] [Edit Prompt] [Send Anyway]
+               │    [Redact] [Ignore] [Send Anyway]
                │
                └─── Severity: Medium/Low
                          │
                          ▼
-                    Non-blocking warning:
+                    Non-blocking panel state:
                     User can submit immediately
-                    Banner shows suggestion
+                    Panel shows suggestions
 ```
 
-### 5.2 Warning Banner Layout
+### 5.2 Intervention Panel Layout (current model)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ ⚠️  REDACTR detected sensitive data                    [×]       │
+│ 🛡 REDACTR panel                                       [×]       │
 ├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  🔴 Credit Card Number (Critical)                                │
-│     "4532-xxxx-xxxx-1234"                                        │
-│                                                                  │
-│  🟠 Email Address (Medium)                                       │
-│     "john.doe@company.com"                                       │
-│                                                                  │
+│ Severity pills + detection cards                                │
+│ Card actions: [Redact] [Ignore] [Undo]                          │
 ├──────────────────────────────────────────────────────────────────┤
-│  [Mask & Send]  [Edit Prompt]  [Allow This Time]  [Always Allow] │
+│ [Redact All] [Send Anyway]  or [Send Redacted] [Reset]          │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -299,17 +311,17 @@ User types prompt
 
 | Action | Behavior | Analytics Event |
 |--------|----------|-----------------|
-| Mask & Send | Replace PII with masked version, auto-submit | `pii_masked` |
-| Edit Prompt | Focus input, highlight PII locations | `pii_edit_requested` |
-| Allow This Time | Submit with PII, suppress for this session | `pii_allowed_once` |
-| Always Allow | Add pattern to allowlist permanently | `pii_allowlisted` |
-| Dismiss (×) | Close banner, no action | `warning_dismissed` |
+| Redact | Replace selected PII item and keep review flow active | `pii_item_redacted` |
+| Ignore | Mark selected item ignored for current prompt only | `pii_item_ignored` |
+| Redact All | Apply default redactions for all pending items | `pii_batch_redacted` |
+| Send Anyway | Bypass with confirmation for Critical/High items | `send_anyway_confirmed` |
+| Dismiss (×/outside/Escape) | Close panel; unresolved items remain | `panel_closed` (+ `warning_dismissed` when unresolved) |
 
 ### 5.4 Anti-Fatigue Design
 
 | Problem | Solution |
 |---------|----------|
-| Warning fatigue | Aggregate multiple findings in single banner |
+| Warning fatigue | Aggregate multiple findings in a single panel |
 | Repeated false positives | One-click allowlist; "Don't warn for this pattern" |
 | Disrupting workflow | Non-blocking for Medium/Low; keyboard shortcuts |
 | Learning curve | Progressive disclosure; minimal first-run onboarding |
@@ -322,7 +334,7 @@ User types prompt
 
 ---
 
-## 6) Dashboard Specification
+## 6) Dashboard Specification (Planned / future work)
 
 ### 6.1 Layout & Sizing
 
@@ -336,10 +348,10 @@ User types prompt
 | Widget | Description | Data Source |
 |--------|-------------|-------------|
 | **Protection Summary** | Total prompts scanned, count with PII detected, percentage with PII | Aggregated `scan_completed` events |
-| **Severity Breakdown Chart** | Bar or donut chart: Critical / High / Medium / Low counts | `pii_detected` events, grouped by `severity` |
-| **Top PII Categories** | Ranked list with percentages, e.g. Emails 45%, API Keys 20%, Bank Accounts 15%, Phone Numbers 10%, Names 5%, Other 5% | `category` field from detection events |
-| **Intervention Outcomes** | Pie chart: Masked / Allowed Once / Edited / Allowlisted / Dismissed | `pii_masked`, `pii_allowed_once`, `pii_edit_requested`, `pii_allowlisted`, `warning_dismissed` |
-| **Trend Over Time** | Line chart showing incidents per day for past 30 days | Time-series aggregation of `pii_detected` events |
+| **Severity Breakdown Chart** | Bar or donut chart: Critical / High / Medium / Low counts | Severity-bearing intervention and submit events |
+| **Top PII Categories** | Ranked list with percentages, e.g. Emails, API Keys, Bank Accounts, Phone Numbers | Category fields from intervention events |
+| **Intervention Outcomes** | Pie chart: Redacted / Batch Redacted / Ignored / Send Anyway / Dismissed | `pii_item_redacted`, `pii_batch_redacted`, `pii_item_ignored`, `send_anyway_confirmed`, `warning_dismissed` |
+| **Trend Over Time** | Line chart showing incidents per day for past 30 days | Time-series aggregation from intervention + submit events |
 | **History (Recent Incidents)** | Scrollable table: timestamp, platform, category, severity, action taken | Last 50–100 events, paginated |
 
 ### 6.3 Filter Dimensions
@@ -359,14 +371,17 @@ User types prompt
 interface PIIEvent {
   event_id: string;        // UUID
   timestamp: string;       // ISO 8601
-  event_type: 'pii_detected' | 'pii_masked' | 'pii_allowed_once' | 
-              'pii_allowlisted' | 'pii_edit_requested' | 'warning_dismissed';
+  event_type: 'scan_completed' | 'panel_opened' | 'panel_closed' |
+              'pii_item_redacted' | 'pii_item_ignored' | 'pii_batch_redacted' |
+              'submit_intercepted' | 'submit_confirmed' | 'send_anyway_confirmed' |
+              'warning_dismissed' | 'settings_changed' | 'pattern_allowlisted' |
+              'dashboard_viewed';
   platform: 'chatgpt' | 'claude';
-  category: PIICategory;
-  severity: Severity;
-  confidence: number;
-  prompt_length: number;   // Character count (NOT content)
-  action_latency_ms: number; // Time from warning shown to user action
+  category?: PIICategory;
+  severity?: Severity;
+  confidence?: number;
+  prompt_length?: number;     // Character count (NOT content)
+  action_latency_ms?: number; // Time from user prompt to action
   session_id: string;
 }
 ```
@@ -410,18 +425,18 @@ Use a lightweight chart library (Chart.js recommended — small bundle, good def
 | Field | Specification |
 |-------|---------------|
 | Trigger | PII engine returns ≥1 result |
-| UI | Banner above input within 500ms; color-coded by highest severity; shows masked preview per item; dismissable |
-| Edge Cases | Multiple same-category items (group them); rapid re-detection (don't flash banner) |
+| UI | Floating icon + popover panel within 500ms; color-coded by highest severity; per-item cards with redaction actions; dismissable |
+| Edge Cases | Multiple same-category items (separate cards); rapid re-detection updates panel state in place |
 | Acceptance Criteria | Visible without scrolling; ARIA labels + keyboard nav; Shadow DOM isolation |
 
 ### FR-C: Redaction/Masking
 
 | Field | Specification |
 |-------|---------------|
-| Trigger | User clicks "Mask & Send" |
-| Behavior | Replace PII with masks → update input field programmatically → auto-submit |
-| Edge Cases | Overlapping detections (process in reverse index order to preserve positions) |
-| Acceptance Criteria | Non-PII text preserved exactly; works multi-line; Ctrl+Z restores original |
+| Trigger | User clicks `Redact` (per-item) or `Redact All` |
+| Behavior | Apply selected redaction formats and keep user in review flow until explicit send action |
+| Edge Cases | Overlapping detections; index shifts across multiple replacements; stale span mismatch safety |
+| Acceptance Criteria | Non-PII text preserved exactly; works multi-line; per-item Undo restores target span only |
 
 ### FR-D: Submit Interception
 
@@ -436,7 +451,7 @@ Use a lightweight chart library (Chart.js recommended — small bundle, good def
 
 | Field | Specification |
 |-------|---------------|
-| Trigger | "Always Allow" button or Settings panel |
+| Trigger | Settings panel only (`Ignore` remains per-prompt/session-only) |
 | Storage | `chrome.storage.sync` (syncs across devices) |
 | Limits | Cap at 100 entries (FIFO eviction) |
 | Acceptance Criteria | Allowlisted patterns never trigger warnings; import/export as JSON; viewable/editable in Settings |
@@ -539,7 +554,7 @@ See Section 6 above for full specification.
 
 ---
 
-## 10) Metrics & Telemetry
+## 10) Metrics & Telemetry (Updated to current event model)
 
 ### 10.1 Event Types
 
@@ -548,13 +563,13 @@ All events are stored locally. Only aggregate/anonymous metrics are sent externa
 | Event | Fields | Purpose |
 |-------|--------|---------|
 | `scan_completed` | platform, char_count, pii_found (bool), latency_ms | Usage tracking |
-| `warning_shown` | severity, category_count, platform | Warning effectiveness |
-| `pii_masked` | categories_masked, original_char_count | Masking adoption |
-| `pii_allowed_once` | category, severity | Override tracking |
-| `pii_allowlisted` | category, is_regex | Allowlist growth |
-| `pii_edit_requested` | category, severity | Edit behavior |
-| `warning_dismissed` | severity, time_visible_ms | Fatigue indicator |
-| `submit_intercepted` | severity, action_taken | Interception effectiveness |
+| `panel_opened` | detection_count, highest_severity, trigger | Panel engagement |
+| `pii_item_redacted` | category, severity, redaction_format | Redaction adoption |
+| `pii_batch_redacted` | item_count, categories, severities | Batch action adoption |
+| `pii_item_ignored` | category, severity | Per-prompt override tracking |
+| `send_anyway_confirmed` | highest_severity, item_count | Explicit bypass tracking |
+| `warning_dismissed` | pending_items, highest_severity | Fatigue indicator |
+| `submit_intercepted` | highest_severity, pending_count | Interception effectiveness |
 | `dashboard_viewed` | filters_applied | Dashboard engagement |
 | `settings_changed` | setting_key, old_value, new_value | Settings adoption |
 
@@ -563,9 +578,9 @@ All events are stored locally. Only aggregate/anonymous metrics are sent externa
 | Signal | Formula | Red Flag If |
 |--------|---------|-------------|
 | False Positive Rate | allowlist_events / total_warnings × 100 | >15% |
-| Override Rate | allow_once / total_warnings | >20% |
+| Override Rate | ignored_or_send_anyway / total_warnings | >20% |
 | Warning Fatigue | dismissed_in_<2s / total_warnings | >50% |
-| Prevention Rate | (masked + edited) / (critical + high warnings) | <50% |
+| Prevention Rate | redacted / (critical + high warnings) | <50% |
 
 ---
 
@@ -603,14 +618,14 @@ Week 11–12: Settings / Allowlist      Week 13–14: Dashboard
 - Configure ESLint, Prettier, Vitest
 - Exit: Extension loads in Chrome dev mode; sample test passes
 
-**Sprint 3–4 (Weeks 5–6): Core Architecture**
+**Sprint 3–4 (Weeks 5–6): Core Architecture (historical)**
 - Implement `manifest.json` (minimal permissions)
 - Content script infrastructure (loads on target URLs)
 - Platform adapter: ChatGPT
 - Platform adapter: Claude
 - Popup UI (on/off toggle + status)
 - Service worker with message passing
-- Exit: "REDACTR Active" banner visible on both platforms; popup toggles on/off
+- Exit: REDACTR activation state visible on both platforms; popup toggles on/off
 
 **Sprint 5–6 (Weeks 7–8): PII Detection Engine**
 - Regex patterns: email, phone, SSN, CC, API keys, bank accounts, national IDs, employee names
@@ -620,11 +635,11 @@ Week 11–12: Settings / Allowlist      Week 13–14: Dashboard
 - Unit tests (100+ test cases)
 - Exit: ≥95% precision on test corpus; <100ms analysis latency
 
-**Sprint 7–8 (Weeks 9–10): Warning UI & Interception**
-- Shadow DOM UI injection for warning banners
+**Sprint 7–8 (Weeks 9–10): Warning UI & Interception (historical)**
+- Shadow DOM UI injection for icon + panel
 - Severity-based color coding
 - Submit interception for Critical/High
-- "Mask & Send" functionality
+- Per-item and batch redaction functionality
 - All user action handlers
 - Exit: Warnings appear <500ms; submit blocked for Critical/High; masking works
 
@@ -729,7 +744,7 @@ Run Playwright scripts daily checking selector validity on ChatGPT and Claude fo
 | 1 | High false positive rate | High | High | Tune patterns; add context detection; code block awareness |
 | 2 | ChatGPT DOM changes break selectors | High | High | Adapter abstraction; 3+ fallback selectors; daily smoke tests |
 | 3 | Claude DOM changes break selectors | Medium | High | Same adapter pattern; daily smoke tests |
-| 4 | Warning fatigue (users dismiss everything) | Medium | High | Aggregated banners; severity tuning; allowlist UX |
+| 4 | Warning fatigue (users dismiss everything) | Medium | High | Aggregated panel views; severity tuning; allowlist UX |
 | 5 | Performance degradation on long prompts | Low | High | Chunked processing for >10K chars; profiling sprints |
 | 6 | Chrome Web Store rejection | Low | Critical | Pre-submission review; minimal permissions; no `<all_urls>` |
 | 7 | Manifest V3 API limitations | Low | Medium | Research alternative approaches early |

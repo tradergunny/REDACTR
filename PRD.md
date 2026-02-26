@@ -244,7 +244,7 @@ type EventType =
 - **High false positives**: Allowlist + code-block detection + tuning.
 - **Platform DOM changes**: Adapter fallback selectors + daily smoke tests.
 - **Claude contenteditable instability**: Early POC + alternative capture methods.
-- **Warning fatigue**: Aggregate banners, severity tuning.
+- **Warning fatigue**: Panel-level aggregation and severity tuning.
 - **Performance on long prompts**: Chunked processing >10K chars.
 - **Storage quotas**: 30-day pruning, allowlist cap.
 

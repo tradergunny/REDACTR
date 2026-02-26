@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Docs: Aligned blueprint/spec/docs with implemented Phase 1-4 behavior and current contracts.
+  - Files: `README.md`, `PRD.md`, `REDACTR_BUILD_GUIDE.md`, `REDACTR_DEV_BLUEPRINT.md`, `TEST_CASES.md`, `QA_TEST_PLAN.md`, `DASHBOARD_SPEC.md`
+  - Behavior: updated stale pre-implementation status text; corrected active intervention flow terminology (`Redact`/`Ignore`/`Redact All`/`Send Anyway`), adapter contract references, and dashboard data-source event mapping to current schema.
+  - Behavior: split validation docs into implemented-now vs planned-phase coverage for Settings (Phase 5) and Dashboard (Phase 6).
+  - Validation: docs consistency scan completed (deprecated terms restricted to explicit legacy/deprecation context); `npm test` passed on February 26, 2026 (`20` files, `698` tests).
+
 - Intervention: Restored immediate contenteditable redaction using explicit span operations with live range tracking.
   - Files: `src/content/intervention/controller.ts`, `src/content/intervention/types.ts`
   - Behavior: `Redact`/`Undo`/`Redact All`/`Reset` now mutate contenteditable prompts immediately again without using broad diff synthesis.

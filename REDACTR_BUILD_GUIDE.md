@@ -13,7 +13,7 @@ MV3 scaffold, dev environment, service worker, content script bootstrapping, pop
 
 ### Tag These Files
 ```
-prd.md
+PRD.md
 ARCHITECTURE_PII.md
 CHANGELOG.md
 ```
@@ -47,7 +47,7 @@ Adapter interface + ChatGPT and Claude implementations with resilient selectors 
 
 ### Tag These Files
 ```
-prd.md
+PRD.md
 ARCHITECTURE_PII.md
 ADAPTER_SPEC.md
 CHANGELOG.md
@@ -85,7 +85,7 @@ Full regex rulebook, severity scoring, Luhn validation, masking utilities, debou
 
 ### Tag These Files
 ```
-prd.md
+PRD.md
 PII_RULEBOOK.md
 EVENT_SCHEMA.md
 CHANGELOG.md
@@ -127,7 +127,7 @@ Floating toggle icon + popover panel with per-item redaction controls, severity 
 
 ### Tag These Files
 ```
-prd.md
+PRD.md
 ADAPTER_SPEC.md
 ARCHITECTURE_PII.md
 EVENT_SCHEMA.md
@@ -181,7 +181,7 @@ CHANGELOG.md
 > - Update the PlatformAdapter interface:
 >   - RENAME `getWarningAnchor()` → `getIconAnchor(): HTMLElement | null` — returns the input area's parent/wrapper where the icon should be appended as a sibling
 >   - ADD `getInputAreaWrapper(): HTMLElement | null` — returns the container to position the popover relative to
->   - KEEP `renderWarning` but repurpose or remove — the panel now handles its own rendering
+>   - REMOVE legacy `renderWarning` from active adapter guidance; panel components now own rendering
 > - Update ChatGPT and Claude adapters with new anchor selectors
 > 
 > **E) Styling & Accessibility**
@@ -240,7 +240,7 @@ Settings panel UI, category toggles, sensitivity slider, allowlist CRUD, chrome.
 
 ### Tag These Files
 ```
-prd.md
+PRD.md
 SETTINGS_SPEC.md
 EVENT_SCHEMA.md
 CHANGELOG.md
@@ -289,7 +289,7 @@ New-tab dashboard page with 6 widgets, 4 filter dimensions, Chart.js, 30-day rol
 
 ### Tag These Files
 ```
-prd.md
+PRD.md
 DASHBOARD_SPEC.md
 EVENT_SCHEMA.md
 PERFORMANCE.md
@@ -307,7 +307,7 @@ CHANGELOG.md
 >   1. Protection Summary (stat cards: total scanned, PII detected count, percentage)
 >   2. Severity Breakdown (bar or donut chart: Critical/High/Medium/Low)
 >   3. Top PII Categories (ranked list with percentage bars)
->   4. Intervention Outcomes (pie chart: Masked/Allowed/Edited/Allowlisted/Dismissed)
+>   4. Intervention Outcomes (pie chart: Redacted/Batch Redacted/Ignored/Send Anyway/Dismissed)
 >   5. Trend Over Time (line chart: incidents per day, past 30 days)
 >   6. History (scrollable paginated table: timestamp, platform, category, severity, action)
 > - Use Chart.js for all charts
@@ -344,7 +344,7 @@ Automated regression, performance/security/accessibility audits, store-readiness
 
 ### Tag These Files
 ```
-prd.md
+PRD.md
 QA_TEST_PLAN.md
 TEST_CASES.md
 PERFORMANCE.md
@@ -404,13 +404,13 @@ CHANGELOG.md
 
 | Phase | Always Tag | Phase-Specific Tags |
 |-------|-----------|-------------------|
-| **1 — Foundation** | `prd.md`, `CHANGELOG.md` | `ARCHITECTURE_PII.md` |
-| **2 — Adapters** | `prd.md`, `CHANGELOG.md` | `ARCHITECTURE_PII.md`, `ADAPTER_SPEC.md` |
-| **3 — PII Engine** | `prd.md`, `CHANGELOG.md` | `PII_RULEBOOK.md`, `EVENT_SCHEMA.md` |
-| **4 — Warning UX** | `prd.md`, `CHANGELOG.md` | `ADAPTER_SPEC.md`, `ARCHITECTURE_PII.md`, `EVENT_SCHEMA.md` |
-| **5 — Settings** | `prd.md`, `CHANGELOG.md` | `SETTINGS_SPEC.md`, `EVENT_SCHEMA.md` |
-| **6 — Dashboard** | `prd.md`, `CHANGELOG.md` | `DASHBOARD_SPEC.md`, `EVENT_SCHEMA.md`, `PERFORMANCE.md` |
-| **7 — Hardening** | `prd.md`, `CHANGELOG.md` | `QA_TEST_PLAN.md`, `TEST_CASES.md`, `PERFORMANCE.md`, `SECURITY.md`, `THREAT_MODEL.md`, `PRIVACY_POLICY.md`, `RELEASE.md` |
+| **1 — Foundation** | `PRD.md`, `CHANGELOG.md` | `ARCHITECTURE_PII.md` |
+| **2 — Adapters** | `PRD.md`, `CHANGELOG.md` | `ARCHITECTURE_PII.md`, `ADAPTER_SPEC.md` |
+| **3 — PII Engine** | `PRD.md`, `CHANGELOG.md` | `PII_RULEBOOK.md`, `EVENT_SCHEMA.md` |
+| **4 — Warning UX** | `PRD.md`, `CHANGELOG.md` | `ADAPTER_SPEC.md`, `ARCHITECTURE_PII.md`, `EVENT_SCHEMA.md` |
+| **5 — Settings** | `PRD.md`, `CHANGELOG.md` | `SETTINGS_SPEC.md`, `EVENT_SCHEMA.md` |
+| **6 — Dashboard** | `PRD.md`, `CHANGELOG.md` | `DASHBOARD_SPEC.md`, `EVENT_SCHEMA.md`, `PERFORMANCE.md` |
+| **7 — Hardening** | `PRD.md`, `CHANGELOG.md` | `QA_TEST_PLAN.md`, `TEST_CASES.md`, `PERFORMANCE.md`, `SECURITY.md`, `THREAT_MODEL.md`, `PRIVACY_POLICY.md`, `RELEASE.md` |
 
 ---
 
@@ -420,7 +420,7 @@ CHANGELOG.md
 2. **Tag only what's needed.** More files = more context noise. The cheat sheet above is optimized for signal.
 3. **Always tag CHANGELOG.md.** Every phase should produce changelog entries.
 4. **Review generated code before moving on.** Codex may produce plausible but incorrect implementations — especially for DOM selectors and regex patterns.
-5. **If Codex asks clarifying questions,** reference the specific section of `prd.md` that answers it.
+5. **If Codex asks clarifying questions,** reference the specific section of `PRD.md` that answers it.
 6. **If a phase fails exit criteria,** tell Codex what failed and ask it to fix specifically that. Don't re-prompt the entire phase.
 7. **After Phase 3 (PII Engine),** manually test detection on real ChatGPT/Claude prompts before proceeding — this is the critical gate.
 

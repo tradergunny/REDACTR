@@ -4,16 +4,24 @@ PII protection layer for AI chatbots as a Chrome extension (Manifest V3). All de
 
 ## Status
 
-Documentation scaffolding is in place. Implementation is planned and not yet present in this repo.
+Implemented in this repo through:
+- Phase 1 Foundation
+- Phase 2 Platform Adapters
+- Phase 3 PII Detection Engine
+- Phase 4 Intervention UX and Submit Control
+
+Planned next:
+- Phase 5 Settings expansion
+- Phase 6 Dashboard
 
 ## Scope (MVP)
 
 - Real-time PII scanning in ChatGPT and Claude
 - Severity-based warnings and submit interception
-- One-click masking
+- Per-item and batch redaction controls
 - Allowlist controls
-- Dashboard in a new tab
-- Settings panel
+- Dashboard in a new tab (planned)
+- Settings panel expansion (planned)
 
 ## Non-Goals (MVP)
 
@@ -27,12 +35,12 @@ Documentation scaffolding is in place. Implementation is planned and not yet pre
 - Chrome 120+
 - Edge 120+
 
-## Planned Stack
+## Stack
 
 - TypeScript
 - Vite + CRXJS
 - Manifest V3 service worker
-- Chart.js for dashboard charts
+- Vitest + jsdom
 
 ## Repo Docs
 
@@ -50,11 +58,14 @@ Documentation scaffolding is in place. Implementation is planned and not yet pre
 - `RELEASE.md`
 - `PRIVACY_POLICY.md`
 
-## Development Setup (Planned)
+## Development Setup
 
-1. Install dependencies
-2. Build the extension
-3. Load unpacked extension in Chrome
-4. Open ChatGPT or Claude to verify injection
+1. `npm install`
+2. `npm run dev`
+3. Load unpacked extension in Chrome from `dist/`
+4. Verify injection on ChatGPT or Claude
 
-Note: This section will be updated once implementation exists.
+## Validation Commands
+
+- `npm test`
+- `npm run build`
