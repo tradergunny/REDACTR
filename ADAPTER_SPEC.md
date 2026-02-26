@@ -10,11 +10,15 @@ interface PlatformAdapter {
   detectInputElement(): HTMLElement | null;
   getInputType(): 'textarea' | 'contenteditable' | 'input';
   captureText(): string;
+  setText(nextText: string): void;
+  applyTextReplacements(baseText: string, replacements: TextReplacement[]): boolean;
   onTextChanged(callback: (text: string) => void): () => void;
   getSubmitButton(): HTMLElement | null;
   onSubmitIntercept(callback: (event: Event) => boolean): () => void;
-  getIconAnchor(): HTMLElement | null;           // Returns input area wrapper where icon is appended as sibling
-  getInputAreaWrapper(): HTMLElement | null;      // Returns container for popover positioning reference
+  getIconAnchor(): HTMLElement | null;
+  getIconPlacement(): IconPlacementConfig;
+  getInputAreaWrapper(): HTMLElement | null;
+  renderInlineHighlight(range: TextRange, severity: Severity): void;
   cleanup(): void;
 }
 ```
@@ -23,8 +27,8 @@ interface PlatformAdapter {
 
 | Platform | Input Element | Submit Button | Icon Anchor | Notes |
 | --- | --- | --- | --- | --- |
-| ChatGPT | `textarea#prompt-textarea` | `button[data-testid="send-button"]` | Parent container of `textarea#prompt-textarea` (form or div wrapper) | Textarea auto-resizes |
-| Claude | `div[contenteditable="true"]` | `button[aria-label*="Send"]` | Parent container of `div[contenteditable="true"]` (composer wrapper) | Requires innerHTML parsing |
+| ChatGPT | `div#prompt-textarea[contenteditable="true"]` or `textarea#prompt-textarea` | `button[data-testid="send-button"]` (with fallbacks) | Composer wrapper near the active input | Supports both contenteditable and textarea composers |
+| Claude | `div[contenteditable="true"]` | `button[data-testid*="send"]` / `button[aria-label*="Send"]` | Composer wrapper near the active input | Uses contenteditable text-node extraction and range-safe replacements |
 
 ## Selector Resilience Strategy
 
@@ -38,7 +42,7 @@ interface PlatformAdapter {
 - Find the input area's parent wrapper (the div containing the textarea/contenteditable + send button)
 - Append the REDACTR icon as a last-child sibling OUTSIDE the input element but INSIDE the wrapper
 - This keeps the icon adjacent to the input without injecting into volatile internal DOM
-- Position icon bottom-right, outside the input wrapper (`right: -38px`, `bottom: 8px`)
+- Default placement is inside-right (`right: 8px`, `bottom: 8px`) via `getIconPlacement()`
 - If overlapping known platform floating controls, nudge icon by ~40px
   - ChatGPT: scroll/jump affordances
   - Claude: attachment overlay controls
@@ -54,7 +58,7 @@ interface PlatformAdapter {
 ## Event Hooks
 
 - onTextChanged must debounce at 300ms
-- Immediate scan on paste
+- Paste/input events feed the same debounced scan pipeline
 - onSubmitIntercept must return false to block
 
 ## Cleanup

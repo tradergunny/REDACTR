@@ -2,7 +2,7 @@
 
 ## Overview
 
-REDACTR runs fully in the browser as a Manifest V3 extension. All PII detection is local. No backend services are required.
+REDACTR runs fully in the browser as a Manifest V3 extension. All PII detection is local. No backend services are required. External analytics is optional (opt-in, disabled by default).
 
 ## High-Level Data Flow
 

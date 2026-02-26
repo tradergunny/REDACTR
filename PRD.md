@@ -1,7 +1,8 @@
 # REDACTR Technical PRD (MVP)
 
-**Version:** 1.0  
-**Date:** 2026-02-16
+**Version:** 1.1  
+**Date:** 2026-02-26  
+**Last aligned with implementation:** `CHANGELOG.md` (`[Unreleased]`)
 
 ## 1) Technical Scope (MVP Only)
 
@@ -20,6 +21,12 @@
 - Prompt coaching, hallucination detection, or AI rewriting.
 - SSO, team/admin dashboards, or backend services.
 - Any cloud processing of prompts or PII.
+
+## Implementation Status (as of 2026-02-26)
+
+- **Shipped**: Phase 1 Foundation, Phase 2 Platform Adapters, Phase 3 PII Detection Engine, Phase 4 Intervention UX & Submit Control.
+- **Planned**: Phase 5 Settings expansion, Phase 6 Dashboard.
+- Scope in this PRD remains unchanged; this section clarifies current implementation status only.
 
 ## 2) System Overview
 
@@ -117,23 +124,26 @@ type EventType =
 
 ### FR-C: Redaction/Masking
 - **Trigger**: User clicks "Redact" on individual detection card, or "Redact All" in panel footer.
-- **Behavior**: Per-item redaction with selectable format (dropdown per card). Batch "Redact All" applies severity-driven defaults (Critical/High => token, Medium/Low => partial mask). "Send Redacted" applies all redactions to input text (reverse index order) then triggers platform submit.
-- **Edge cases**: Overlapping detections (reverse index processing); user changes format after redacting (undo then re-pick); multi-line text; re-scan persistence only for exact `category + text` matches.
+- **Behavior**: Per-item redaction uses selectable formats (dropdown per card) and applies immediate in-editor updates for `textarea` and `contenteditable` via structured text replacements/range patching. Batch "Redact All" applies severity-driven defaults (Critical/High => token, Medium/Low => partial mask) and is atomic for `contenteditable` (all-or-none against current editor state). "Send Redacted" submits with all applied redactions. If a safe replacement cannot be applied, the operation aborts with fail-safe no-op behavior (no destructive full-text fallback).
+- **Edge cases**: Index shifts across multiple far-apart replacements; stale span mismatch safety (skip/no-op instead of risky rewrite); overlapping detections; user format change after redaction (undo then re-pick); multiline content and formatting preservation; re-scan persistence only for exact `category + text` matches.
 - **Acceptance**:
-  - Non-PII text preserved exactly.
+  - Non-PII text and formatting are preserved exactly.
   - Category-appropriate redaction format options available.
-  - Ctrl+Z restores original in input field.
+  - Undo restores only the targeted token/span.
+  - No broad `setText` fallback is used on `contenteditable` replacement failure.
+  - "Redact All" is atomic for `contenteditable`.
   - Undo available on each resolved card in panel.
 
 ### FR-D: Submit Interception
 - **Trigger**: Submit click or Enter with Critical/High PII detected and unresolved.
-- **Behavior**: Block submit, dim platform send button, clicking blocked send auto-opens REDACTR panel. User must resolve all Critical/High items (Redact or Ignore). "Send Anyway" for Critical/High uses confirmation modal and submits pending items as original text while keeping already-applied redactions. Medium/Low never block submit.
+- **Behavior**: Unresolved Critical/High items block native submit. The native send button is dimmed and blocked-send interaction opens the REDACTR panel. Users resolve blocking items via per-item actions (`Redact` or `Ignore`) or proceed through "Send Anyway" (confirmation modal required) which submits pending items as original text while preserving already-applied redactions. Ignore decisions are per-prompt and reset on submit or when input becomes empty. Medium/Low never block submit.
 - **Edge cases**: Rapid submits (debounce 200ms); user closes panel without resolving (submit stays blocked); platform changes submit mechanism; per-prompt decisions clear on submit or empty input.
 - **Acceptance**:
   - >=99% interception success.
   - No false blocks when no PII.
   - User can always override via Send Anyway → confirmation.
   - Dimmed send button provides clear visual feedback.
+  - Required `contenteditable` redaction apply failure results in no-submit (fail-safe abort).
 
 ### FR-E: Allowlist Controls
 - **Trigger**: Settings panel only (allowlisting is not available from the detection panel; "Ignore" in the panel is session-only).
@@ -144,7 +154,7 @@ type EventType =
   - Import/export JSON supported.
   - View/edit in Settings.
 
-### FR-F: Dashboard
+### FR-F: Dashboard (Planned Phase 6)
 - **Location**: New-tab page (min 800x600px).
 - **Widgets**: Summary, severity chart, top categories, outcomes, trend line, history table.
 - **Filters**: Time range, platform, severity, category.
@@ -153,7 +163,7 @@ type EventType =
   - Chart render <1s after data load.
   - Filter response <500ms.
 
-### FR-G: Settings Panel
+### FR-G: Settings Panel (Planned Phase 5)
 - **Sections**: Detection, Notifications, Privacy, About.
 - **Controls**: Category toggles, sensitivity slider, submit blocking toggle, analytics opt-in, clear data, reset defaults.
 - **Acceptance**:
@@ -220,8 +230,8 @@ type EventType =
 - Adapter captures input and triggers detection.
 - Detection results render warning UI.
 - Critical/High blocks submit.
-- Settings persist via storage.
-- Dashboard widgets reflect event data.
+- Settings persist via storage (planned Phase 5 scope).
+- Dashboard widgets reflect event data (planned Phase 6 scope).
 
 **Regression & performance**
 - Daily Playwright selector checks for ChatGPT/Claude.
@@ -240,9 +250,8 @@ type EventType =
 
 ## 9) Open Technical Questions
 
-- Best heuristic for detecting code blocks in `contenteditable` rich text.
-- Strategy for reliable submit interception if platforms change to non-standard submit flows.
-- Event aggregation granularity for dashboard (real-time vs. on-demand).
+- Final dashboard aggregation strategy for Phase 6 (rollup cadence, pre-aggregation vs on-demand query).
+- Hardening strategy for major platform DOM overhauls beyond current fallback selectors and smoke tests.
 
 ## 10) Appendix
 
