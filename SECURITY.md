@@ -4,7 +4,7 @@
 
 Please report security issues privately.
 
-- Contact: security@example.com
+- Contact: tradergunny@gmail.com
 - Provide steps to reproduce and impact analysis
 
 ## Scope
